@@ -1,0 +1,7 @@
+file /Users/taniapouli/Documents/PROJECTS/Energy/GoS/WattLab_Hackathon_2025/media/noise30s_1080p30.mov
+file /Users/taniapouli/Documents/PROJECTS/Energy/GoS/WattLab_Hackathon_2025/media/noise30s_1080p30.mov
+file /Users/taniapouli/Documents/PROJECTS/Energy/GoS/WattLab_Hackathon_2025/media/black30s_1080p30.mov
+file /Users/taniapouli/Documents/PROJECTS/Energy/GoS/WattLab_Hackathon_2025/media/white30s_1080p30.mov
+file /Users/taniapouli/Documents/PROJECTS/Energy/GoS/WattLab_Hackathon_2025/media/black30s_1080p30.mov
+file /Users/taniapouli/Documents/PROJECTS/Energy/GoS/WattLab_Hackathon_2025/media/elfuente_180s_1080p30_prores422.mov
+file /Users/taniapouli/Documents/PROJECTS/Energy/GoS/WattLab_Hackathon_2025/media/black30s_1080p30.mov
