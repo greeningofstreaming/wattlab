@@ -11,6 +11,40 @@ UPLOAD_DIR = Path("/tmp/wattlab_uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 LOCK_FILE = Path("/tmp/gos-measure.lock")
 
+
+# Services to pause during measurement
+FOCUS_MODE_UNITS = [
+    "sysstat-collect.timer",
+    "anacron.timer",
+    "fwupd-refresh.timer",
+    "apt-daily.timer",
+    "apt-daily-upgrade.timer",
+    "man-db.timer",
+    "motd-news.timer",
+    "update-notifier-download.timer",
+]
+
+def focus_mode_enter():
+    """Stop background timers before measurement."""
+    stopped = []
+    for unit in FOCUS_MODE_UNITS:
+        result = subprocess.run(
+            ["sudo", "systemctl", "stop", unit],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            stopped.append(unit)
+    return stopped
+
+def focus_mode_exit(stopped: list):
+    """Restart background timers after measurement — run in parallel."""
+    import concurrent.futures
+    def start_unit(unit):
+        subprocess.run(["sudo", "systemctl", "start", unit],
+                      capture_output=True, text=True)
+    with concurrent.futures.ThreadPoolExecutor() as ex:
+        list(ex.map(start_unit, stopped))
+
 PRESETS = {
     "cpu": {
         "label": "CPU encode",
@@ -103,6 +137,8 @@ def confidence(delta_w: float, poll_count: int) -> dict:
 # --- ffmpeg ---
 
 def transcode(cmd: list) -> dict:
+    # nice -n -5 gives ffmpeg elevated CPU scheduling priority
+    cmd = ["nice", "-n", "-5"] + cmd
     t_start = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True)
     t_end = time.time()
@@ -237,12 +273,16 @@ def analyse(cpu: dict, gpu: dict) -> dict:
 
 async def run_video_measurement(input_path: Path, job_id: str,
                                 preset_key: str) -> dict:
+    stopped = focus_mode_enter()
     baseline = await measure_baseline(polls=10)
     LOCK_FILE.write_text(job_id)
     try:
         result = await run_single(input_path, job_id, preset_key, baseline)
     finally:
         LOCK_FILE.unlink(missing_ok=True)
+        # Run focus_mode_exit in executor so it doesn't block event loop
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, focus_mode_exit, stopped)
     return {
         "mode": "single",
         "job_id": job_id,
@@ -251,18 +291,26 @@ async def run_video_measurement(input_path: Path, job_id: str,
         "scope": "Device layer only (GoS1 server). Network, CDN, CPE excluded.",
     }
 
-async def run_both_measurement(input_path: Path, job_id: str) -> dict:
+async def run_both_measurement(input_path: Path, job_id: str, jobs: dict = None) -> dict:
+    if jobs is not None: jobs[job_id]["stage"] = "baseline"
+    stopped = focus_mode_enter()
     baseline = await measure_baseline(polls=10)
     LOCK_FILE.write_text(job_id)
     try:
+        if jobs is not None: jobs[job_id]["stage"] = "cpu_encode"
         cpu_result = await run_single(input_path, job_id, "cpu", baseline)
-        # rest between runs
-        await asyncio.sleep(10)
+        if jobs is not None: jobs[job_id]["stage"] = "rest"
+        # rest between runs — 60s to allow CPU thermals to stabilise
+        await asyncio.sleep(60)
+        if jobs is not None: jobs[job_id]["stage"] = "baseline_2"
         # fresh baseline for GPU
         gpu_baseline = await measure_baseline(polls=10)
+        if jobs is not None: jobs[job_id]["stage"] = "gpu_encode"
         gpu_result = await run_single(input_path, job_id, "gpu", gpu_baseline)
     finally:
         LOCK_FILE.unlink(missing_ok=True)
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, focus_mode_exit, stopped)
 
     analysis = analyse(cpu_result, gpu_result)
 
@@ -274,3 +322,11 @@ async def run_both_measurement(input_path: Path, job_id: str) -> dict:
         "analysis": analysis,
         "scope": "Device layer only (GoS1 server). Network, CDN, CPE excluded.",
     }
+
+async def run_video_measurement_path(path: str, job_id: str, preset_key: str) -> dict:
+    """Run measurement on an already-present file (pre-loaded content)."""
+    return await run_video_measurement(Path(path), job_id, preset_key)
+
+async def run_both_measurement_path(path: str, job_id: str) -> dict:
+    """Run both measurements on an already-present file (pre-loaded content)."""
+    return await run_both_measurement(Path(path), job_id)

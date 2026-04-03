@@ -5,7 +5,8 @@ from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from dotenv import dotenv_values
 from tapo import ApiClient
-from video import run_video_measurement, run_both_measurement, UPLOAD_DIR, LOCK_FILE
+from video import run_video_measurement, run_both_measurement, run_video_measurement_path, run_both_measurement_path, UPLOAD_DIR, LOCK_FILE
+from sources import get_all_sources, PRELOADED
 
 config = dotenv_values("/home/gos/wattlab/.env")
 app = FastAPI()
@@ -169,7 +170,45 @@ async def video_page():
         </div>
     </div>
 
-    <input type="file" id="fileInput" accept=".mp4,.mov,.mkv,.avi,.webm,.ts">
+    <div style="margin-bottom:1.5rem">
+        <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+                    letter-spacing:0.05em;margin-bottom:0.75rem">Source</div>
+        <div style="display:flex;flex-direction:column;gap:0.5rem">
+            <label style="display:flex;align-items:flex-start;gap:0.75rem;
+                          border:1px solid #333;padding:0.75rem;cursor:pointer"
+                   id="src-upload-label">
+                <input type="radio" name="source" value="upload" checked
+                       onchange="selectSource('upload')"
+                       style="margin-top:0.2rem;accent-color:#00ff99">
+                <div>
+                    <div style="color:#e0e0e0;font-size:0.85rem">Upload a file</div>
+                    <div style="color:#555;font-size:0.75rem">
+                        MP4, MOV, MKV, AVI, WebM, TS · Max 1GB
+                    </div>
+                </div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:0.75rem;
+                          border:1px solid #333;padding:0.75rem;cursor:pointer"
+                   id="src-meridian-label">
+                <input type="radio" name="source" value="meridian_4k"
+                       onchange="selectSource('meridian_4k')"
+                       style="margin-top:0.2rem;accent-color:#00ff99">
+                <div>
+                    <div style="color:#e0e0e0;font-size:0.85rem">
+                        Meridian 4K · Netflix Open Content
+                    </div>
+                    <div style="color:#555;font-size:0.75rem">
+                        3840×2160 · 59.94fps · H.264 · 12min · 812MB · CC BY 4.0<br>
+                        ⚠ Both mode ~6-8 min total
+                    </div>
+                </div>
+            </label>
+        </div>
+    </div>
+
+    <div id="upload-area">
+        <input type="file" id="fileInput" accept=".mp4,.mov,.mkv,.avi,.webm,.ts">
+    </div>
     <button id="runBtn" onclick="uploadAndRun()">Upload & Measure</button>
 
     <div id="status"></div>
@@ -177,20 +216,30 @@ async def video_page():
 
     <script>
     let selectedPreset = 'both';
+    let selectedSource = 'upload';
+
+    function selectSource(src) {{
+        selectedSource = src;
+        document.getElementById('upload-area').style.display =
+            src === 'upload' ? 'block' : 'none';
+        document.getElementById('runBtn').textContent =
+            src === 'upload' ? 'Upload & Measure' : 'Run Measurement';
+    }}
     let progressTimer = null;
     let elapsedTimer = null;
     let startTime = null;
 
     const STAGES = {{
-        cpu:  ['Baseline', 'CPU encode', 'Done'],
-        gpu:  ['Baseline', 'GPU encode', 'Done'],
-        both: ['Baseline', 'CPU encode', 'Rest', 'Baseline 2', 'GPU encode', 'Done'],
+        cpu:  ['Baseline', 'CPU encode', 'Cleanup', 'Done'],
+        gpu:  ['Baseline', 'GPU encode', 'Cleanup', 'Done'],
+        both: ['Baseline', 'CPU encode', 'Rest', 'Baseline 2', 'GPU encode', 'Cleanup', 'Done'],
     }};
 
-    const STAGE_ICONS = {{
-        done:    '✓',
-        active:  '▶',
-        pending: '·',
+    const STAGE_MAP = {{
+        cpu:  {{'starting':0, 'baseline':0, 'cpu_encode':1, 'cleanup':2, 'done':3}},
+        gpu:  {{'starting':0, 'baseline':0, 'gpu_encode':1, 'cleanup':2, 'done':3}},
+        both: {{'starting':0, 'baseline':0, 'cpu_encode':1, 'rest':2,
+                'baseline_2':3, 'gpu_encode':4, 'cleanup':5, 'done':6}},
     }};
 
     function selectPreset(key) {{
@@ -206,55 +255,34 @@ async def video_page():
         return m > 0 ? `${{m}}m ${{s % 60}}s` : `${{s}}s`;
     }}
 
-    function estimateStage(elapsedS, mode) {{
-        // Rough stage boundaries in seconds
-        if (mode === 'both') {{
-            if (elapsedS < 10)  return 0; // baseline
-            if (elapsedS < 80)  return 1; // cpu encode (est ~60s)
-            if (elapsedS < 90)  return 2; // rest
-            if (elapsedS < 100) return 3; // baseline 2
-            if (elapsedS < 180) return 4; // gpu encode
-            return 5;
-        }} else {{
-            if (elapsedS < 10) return 0;
-            if (elapsedS < 120) return 1;
-            return 2;
-        }}
-    }}
-
-    function renderProgress(jobId, mode) {{
+    function renderProgress(jobId, mode, serverStage) {{
         const stages = STAGES[mode];
-        startTime = Date.now();
 
-        function update() {{
-            const elapsed = Date.now() - startTime;
-            const elapsedS = elapsed / 1000;
-            const currentStage = estimateStage(elapsedS, mode);
+        const stageMap = STAGE_MAP[mode];
+        const currentStage = stageMap[serverStage] !== undefined
+            ? stageMap[serverStage] : 0;
 
-            const stageHTML = stages.map((label, i) => {{
-                let state = i < currentStage ? 'done' : i === currentStage ? 'active' : 'pending';
-                let icon = state === 'done' ? '✓' : state === 'active' ? '▶' : '·';
-                let iconColor = state === 'done' ? '#00ff99' : state === 'active' ? '#ffaa00' : '#333';
-                return `<div class="stage ${{state}}">
-                    <span class="stage-icon" style="color:${{iconColor}}">${{icon}}</span>
-                    <span class="stage-label">${{label}}</span>
-                </div>`;
-            }}).join('');
+        const stageHTML = stages.map((label, i) => {{
+            let state = i < currentStage ? 'done' : i === currentStage ? 'active' : 'pending';
+            let icon = state === 'done' ? '✓' : state === 'active' ? '▶' : '·';
+            let iconColor = state === 'done' ? '#00ff99' : state === 'active' ? '#ffaa00' : '#333';
+            return `<div class="stage ${{state}}">
+                <span class="stage-icon" style="color:${{iconColor}}">${{icon}}</span>
+                <span class="stage-label">${{label}}</span>
+            </div>`;
+        }}).join('');
 
-            document.getElementById('status').innerHTML = `
-                <div class="progress-box">
-                    <div class="progress-header">Running measurement — do not close this tab</div>
-                    <div class="stages">${{stageHTML}}</div>
-                    <div class="progress-footer">
-                        <span>Job: ${{jobId}}</span>
-                        <span class="elapsed">Elapsed: ${{formatElapsed(elapsed)}}</span>
-                        <span>polling every 5s · zero load on GoS1</span>
-                    </div>
-                </div>`;
-        }}
-
-        update();
-        progressTimer = setInterval(update, 500);
+        const elapsed = Date.now() - startTime;
+        document.getElementById('status').innerHTML = `
+            <div class="progress-box">
+                <div class="progress-header">Running measurement — do not close this tab</div>
+                <div class="stages">${{stageHTML}}</div>
+                <div class="progress-footer">
+                    <span>Job: ${{jobId}}</span>
+                    <span class="elapsed">Elapsed: ${{formatElapsed(elapsed)}}</span>
+                    <span>polling every 5s · zero load on GoS1</span>
+                </div>
+            </div>`;
     }}
 
     function stopProgress() {{
@@ -262,44 +290,51 @@ async def video_page():
     }}
 
     async function uploadAndRun() {{
-        const file = document.getElementById('fileInput').files[0];
-        if (!file) {{ alert('Please select a file first'); return; }}
-        if (file.size > 1024 * 1024 * 1024) {{ alert('File too large (max 1GB)'); return; }}
-
         const btn = document.getElementById('runBtn');
         btn.disabled = true;
-        document.getElementById('status').innerHTML =
-            '<div style="color:#ffaa00">Uploading ' + file.name + '...</div>';
+        const status = document.getElementById('status');
 
-        const form = new FormData();
-        form.append('file', file);
-        form.append('preset', selectedPreset);
-
+        let resp;
         try {{
-            const resp = await fetch('/video/upload', {{ method: 'POST', body: form }});
+            if (selectedSource === 'upload') {{
+                const file = document.getElementById('fileInput').files[0];
+                if (!file) {{ alert('Please select a file first'); btn.disabled = false; return; }}
+                if (file.size > 1024 * 1024 * 1024) {{ alert('File too large (max 1GB)'); btn.disabled = false; return; }}
+                status.innerHTML = '<div style="color:#ffaa00">Uploading ' + file.name + '...</div>';
+                const form = new FormData();
+                form.append('file', file);
+                form.append('preset', selectedPreset);
+                resp = await fetch('/video/upload', {{ method: 'POST', body: form }});
+            }} else {{
+                status.innerHTML = '<div style="color:#ffaa00">Starting measurement on ' + selectedSource + '...</div>';
+                const form = new FormData();
+                form.append('source_key', selectedSource);
+                form.append('preset', selectedPreset);
+                resp = await fetch('/video/use-source', {{ method: 'POST', body: form }});
+            }}
+
             const data = await resp.json();
             if (data.job_id) {{
-                renderProgress(data.job_id, selectedPreset);
-                pollJob(data.job_id);
+                startTime = Date.now();
+                renderProgress(data.job_id, selectedPreset, 'starting');
+                pollJob(data.job_id, selectedPreset);
             }} else {{
-                document.getElementById('status').innerHTML =
-                    '<div style="color:#ff4400">Error: ' + JSON.stringify(data) + '</div>';
+                status.innerHTML = '<div style="color:#ff4400">Error: ' + JSON.stringify(data) + '</div>';
                 btn.disabled = false;
             }}
         }} catch(e) {{
-            document.getElementById('status').innerHTML =
-                '<div style="color:#ff4400">Upload failed: ' + e + '</div>';
+            status.innerHTML = '<div style="color:#ff4400">Failed: ' + e + '</div>';
             btn.disabled = false;
         }}
     }}
 
-    async function pollJob(jobId) {{
+    async function pollJob(jobId, mode) {{
         try {{
             const resp = await fetch('/video/job/' + jobId);
             const data = await resp.json();
             if (data.status === 'done') {{
                 stopProgress();
-                renderResult(data.result);
+renderResult(data.result);
                 document.getElementById('runBtn').disabled = false;
             }} else if (data.status === 'error') {{
                 stopProgress();
@@ -307,10 +342,11 @@ async def video_page():
                     '<div style="color:#ff4400">Error: ' + data.error + '</div>';
                 document.getElementById('runBtn').disabled = false;
             }} else {{
-                setTimeout(() => pollJob(jobId), 5000);
+                renderProgress(jobId, mode, data.stage || "starting");
+                setTimeout(() => pollJob(jobId, mode), 5000);
             }}
         }} catch(e) {{
-            setTimeout(() => pollJob(jobId), 5000);
+            setTimeout(() => pollJob(jobId, mode), 5000);
         }}
     }}
 
@@ -408,18 +444,39 @@ async def video_page():
 
 # --- Job runner ---
 
-async def run_job(job_id: str, input_path: Path, preset: str):
+async def run_job(job_id: str, input_path: Path, preset: str, delete_after: bool = True):
     try:
-        jobs[job_id] = {"status": "running"}
+        jobs[job_id] = {"status": "running", "stage": "starting"}
         if preset == "both":
-            result = await run_both_measurement(input_path, job_id)
+            result = await run_both_measurement(input_path, job_id, jobs)
         else:
-            result = await run_video_measurement(input_path, job_id, preset)
-        jobs[job_id] = {"status": "done", "result": result}
+            result = await run_video_measurement(input_path, job_id, preset, jobs)
+        jobs[job_id] = {"status": "done", "stage": "done", "result": result}
     except Exception as e:
-        jobs[job_id] = {"status": "error", "error": str(e)}
+        jobs[job_id] = {"status": "error", "stage": "error", "error": str(e)}
     finally:
-        input_path.unlink(missing_ok=True)
+        if delete_after:
+            input_path.unlink(missing_ok=True)
+
+
+@app.post("/video/use-source")
+async def use_preloaded_source(
+    background_tasks: BackgroundTasks,
+    source_key: str = Form(...),
+    preset: str = Form("both")
+):
+    if preset not in ("cpu", "gpu", "both"):
+        return JSONResponse({"error": "Invalid preset"}, status_code=400)
+    if LOCK_FILE.exists():
+        return JSONResponse({"error": "GoS1 is busy with another measurement"}, status_code=409)
+
+    source = PRELOADED.get(source_key)
+    if not source or not source["path"].exists():
+        return JSONResponse({"error": f"Source '{source_key}' not found"}, status_code=404)
+
+    job_id = str(uuid.uuid4())[:8]
+    background_tasks.add_task(run_job, job_id, source["path"], preset, False)
+    return {"job_id": job_id}
 
 @app.post("/video/upload")
 async def upload_video(
@@ -448,6 +505,11 @@ async def upload_video(
 
     background_tasks.add_task(run_job, job_id, input_path, preset)
     return {"job_id": job_id}
+
+
+@app.get("/video/sources")
+async def video_sources():
+    return get_all_sources()
 
 @app.get("/video/job/{job_id}")
 async def job_status(job_id: str):
