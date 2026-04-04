@@ -77,6 +77,26 @@ def confidence(delta_w: float, poll_count: int) -> dict:
     else:
         return {"flag": "🔴", "label": "Need more data"}
 
+# --- Ollama helpers ---
+
+def unload_model(model: str):
+    """Force Ollama to unload model from VRAM before baseline measurement."""
+    import urllib.request, json
+    payload = json.dumps({
+        "model": model,
+        "keep_alive": 0
+    }).encode()
+    req = urllib.request.Request(
+        "http://localhost:11434/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    try:
+        urllib.request.urlopen(req, timeout=10)
+    except:
+        pass
+
 # --- Ollama inference ---
 
 def run_inference(model: str, prompt: str) -> dict:
@@ -115,6 +135,9 @@ async def run_llm_measurement(model_key: str, task_key: str,
     task = TASKS[task_key]
 
     if jobs and job_id: jobs[job_id]["stage"] = "baseline"
+    # Unload model from VRAM so baseline reflects true idle state
+    unload_model(model_key)
+    await asyncio.sleep(3)  # brief settle time
     w_base = await measure_baseline(polls=10)
     sensors_base = read_sensors()
 
