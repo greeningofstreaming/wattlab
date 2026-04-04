@@ -49,6 +49,74 @@ TinyLlama ~15x more energy efficient per token than Mistral. TinyLlama too fast 
 
 ---
 
+## Session 3 — 2026-04-04
+
+### What we built (Phase 4 + Phase 5)
+
+**Phase 4 — Demo Mode**
+- `/demo` guided 4-step journey (Video → LLM → Summary → Findings)
+- GoS visual identity on every page: logo, `#00ff99` accent, monospace data / system-ui narrative
+- Inline methodology explanations, anti-slideware proof points
+- "Previous run" instant-result option in demo flow
+
+**Phase 5 — Image Generation**
+- Upgraded Ollama 0.18.3 → 0.20.2 (native image generation support)
+- Pulled `x/z-image-turbo` (12GB, 10.3B FP8) and `x/flux2-klein` (5.7GB, MLX)
+- **VRAM constraint:** z-image-turbo requires 11.9 GiB; RX 7800 XT has 12 GiB total but only 11.1 GiB available after driver + Ollama overhead — 800 MB short. flux2-klein uses MLX runner which requires CUDA (AMD incompatible). Both blocked on GPU.
+- **Solution:** CPU diffusion via Python `diffusers` + `stabilityai/sd-turbo`, 8 inference steps, 512×512
+- **Measurement result:** 0.2063 Wh/image, ~12s generation, 🟢 Repeatable
+- New module `image_gen.py` with same measurement protocol as video/LLM (P110 polling, baseline, focus mode, thermals, confidence)
+- New `/image` page: prompt input, random colour/mood modifier appended per run (anti-slideware proof), live wall power during generation, result card with generated image + energy metrics
+- Results saved to `results/image/` with base64 PNG embedded in JSON
+- Previous runs browser with 80×80 thumbnail previews
+- New module `persist.py` for flat-file result persistence (all types), `settings.py` for configurable parameters
+
+### Key Image Generation Finding
+
+**SD-Turbo CPU, 8 steps, 512×512 (first run) — 🟢 Repeatable**
+
+| Metric | Value |
+|---|---|
+| Energy / image | 0.2063 Wh |
+| Generation time | 12.15s |
+| Delta above idle | ~30W |
+| Backend | CPU (Ryzen 9 7900, 24 cores) |
+| Model | stabilityai/sd-turbo |
+
+GPU image generation deferred: z-image-turbo needs 11.9 GiB VRAM, card has 12 GiB but only 11.1 GiB available after overhead. GPU measurement possible if overhead reduced or larger card added.
+
+### Bugs fixed this session
+- `/power` endpoint had `{{...}}` double-brace escaping (leftover from f-string edit) → `TypeError: unhashable type: 'dict'` crashing JS poll loop
+- Image page used `r["date"]` (doesn't exist) and `r["data"]` (doesn't exist) from `list_results` summaries — fixed to use `r["saved_at"]` and direct summary fields; added `"image"` branch to `persist._summarise`
+- Image JS polled `/job/{id}` — endpoint doesn't exist; correct path is `/image/job/{id}` — added endpoint and fixed JS
+
+### Deferred (carried forward)
+- GPU image generation (needs VRAM headroom or larger card)
+- LLM result text display in result card (last batch iteration)
+- All-tasks batch launch (T1+T2+T3 in one click)
+- Prompt textarea visibility improvement
+
+---
+
+## Session 2 — 2026-04-04
+
+### What we built (Phases 1–3)
+- **Phase 1 — Research Integrity:** JSON result persistence (`results/video/`, `results/llm/`), CSV + JSON export endpoints, previous-runs browser (last 10 per type, inline on each page)
+- **Phase 2 — Measurement Quality:** LLM streaming inference (token-by-token via Ollama stream API), warm/cold toggle, editable prompts with reset-to-default, batch mode (1×/3×/5×, 10s rest, aggregate + stddev), H.265 CPU/GPU + AV1 CPU video presets
+- **Phase 3 — Settings:** `/settings` page with 8 configurable parameters (baseline polls, video cooldown, LLM rest, unload settle, confidence thresholds), `settings.json` persistence
+
+### Bug noted mid-session
+LLM response was truncated at 500 chars (leftover from original non-streaming `run_inference`). Fixed: `run_inference_streaming` now stores full response; response box height raised to 500px with `white-space:pre-wrap`.
+
+### Deferred change requests
+**Prompt visibility:** The editable prompt textarea was not obvious to first-time users — it only appeared after the service was restarted, and its styling (dark background, subtle border) may make it easy to miss. Consider making the prompt section more prominent or adding a visual label like "Edit prompt ↓" to draw attention to it.
+
+**LLM result text display:** The generated text from inference should be displayed in the result — at minimum the last iteration in batch mode. Currently the response preview may not be prominent enough or may not always render.
+
+**All-tasks batch launch:** Add a single "Run all tasks" button that fires T1 + T2 + T3 sequentially for the selected model, producing a combined report. Useful for a complete per-model benchmark in one click.
+
+---
+
 ## Product Planning — 2026-04-04
 
 ### Two-mode architecture agreed

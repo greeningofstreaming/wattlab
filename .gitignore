@@ -1,2 +1,5 @@
 .env
 test_content/
+results/
+__pycache__/
+*.pyc

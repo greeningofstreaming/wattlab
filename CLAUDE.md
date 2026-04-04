@@ -49,10 +49,11 @@ BouyguesBox (192.168.1.x)
 - Variables: `TAPO_EMAIL`, `TAPO_PASSWORD`, `TAPO_P110_IP`
 
 ## Installed Packages
-- Python: tapo==0.8.12, python-dotenv, fastapi, uvicorn, python-multipart
+- Python: tapo==0.8.12, python-dotenv, fastapi, uvicorn, python-multipart, torch (CPU), diffusers, transformers, accelerate, pillow
 - System: lm-sensors, ffmpeg 6.1.1, nmap
-- AI: Ollama 0.18.3 (systemd service, port 11434)
-- Models: tinyllama:latest (1.1B), mistral:latest (7B)
+- AI: Ollama 0.20.2 (systemd service, port 11434)
+- Models: tinyllama:latest (1.1B), mistral:latest (7B), x/z-image-turbo (12GB, GPU blocked), x/flux2-klein (5.7GB, CUDA/MLX only)
+- Image gen: stabilityai/sd-turbo via diffusers (CPU, cached in ~/.cache/huggingface)
 
 ## Repo Structure
 ```
@@ -112,6 +113,9 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - Home: `http://192.168.1.62:8000`
 - Video: `http://192.168.1.62:8000/video`
 - LLM: `http://192.168.1.62:8000/llm`
+- Image: `http://192.168.1.62:8000/image`
+- Demo: `http://192.168.1.62:8000/demo`
+- Settings: `http://192.168.1.62:8000/settings`
 - Tunnel: `ssh -p 2222 -L 8000:localhost:8000 user@gos1.duckdns.org`
 
 ## Prioritised Roadmap
@@ -133,18 +137,19 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [ ] Configurable: baseline duration, cooldown, repeats, rest time
 - [ ] Settings stored in settings.json
 
-### Phase 4 — Demo Mode (session 4)
-- [ ] /demo guided journey
-- [ ] GoS visual identity (logo, colours, typography)
-- [ ] Inline methodology explanations with "more info" expanders
-- [ ] "See previous run" instant result display
-- [ ] Anti-slideware proof points per test type
+### Phase 4 — Demo Mode (session 4) ✅
+- [x] /demo guided journey
+- [x] GoS visual identity (logo, colours, typography)
+- [x] Inline methodology explanations
+- [x] "Previous run" instant result option
+- [x] Anti-slideware proof points per test type
 
-### Phase 5 — Image Generation (session 5)
-- [ ] Install diffusion model (Ollama or ComfyUI)
-- [ ] Energy per image metric
-- [ ] Live image display as generated
-- [ ] Prompt variation per run (colour modifier)
+### Phase 5 — Image Generation (session 5) ✅
+- [x] Install diffusion model (sd-turbo via diffusers, CPU)
+- [x] Energy per image metric (0.2063 Wh first run, 🟢)
+- [x] Live image display as generated
+- [x] Prompt variation per run (random colour/mood modifier)
+- [ ] GPU image generation (blocked: z-image-turbo needs 11.9 GiB, card has 12 GiB with only 11.1 GiB available)
 
 ### Phase 6 — Public Access (session 6)
 - [ ] nginx reverse proxy
@@ -163,6 +168,11 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - Mistral 7B T3: 0.943 mWh/token 🟢
 - TinyLlama T3: 0.061 mWh/token 🟡 (~15x more efficient)
 - TinyLlama too fast for reliable P110 measurement — batching needed
+
+### Image Generation CPU — SD-Turbo (first run) 🟢
+- 0.2063 Wh/image, 12.15s, ~30W delta above idle
+- Backend: CPU (Ryzen 9 7900), stabilityai/sd-turbo, 8 steps, 512×512
+- GPU deferred: z-image-turbo needs 11.9 GiB VRAM, only 11.1 GiB available
 
 ## Visual Identity
 - Logo: round bug mark from greeningofstreaming.org

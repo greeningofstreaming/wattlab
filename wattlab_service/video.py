@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from dotenv import dotenv_values
 from tapo import ApiClient
+import settings as cfg
 
 config = dotenv_values("/home/gos/wattlab/.env")
 UPLOAD_DIR = Path("/tmp/wattlab_uploads")
@@ -47,7 +48,7 @@ def focus_mode_exit(stopped: list):
 
 PRESETS = {
     "cpu": {
-        "label": "CPU encode",
+        "label": "H.264 CPU",
         "detail": "libx264 · CRF 23 · 1080p · 24 cores",
         "cmd": lambda i, o: [
             "ffmpeg", "-y", "-i", str(i),
@@ -58,7 +59,7 @@ PRESETS = {
         ]
     },
     "gpu": {
-        "label": "GPU encode",
+        "label": "H.264 GPU",
         "detail": "h264_vaapi · QP 23 · 1080p · AMD RX 7800 XT",
         "cmd": lambda i, o: [
             "ffmpeg", "-y",
@@ -69,7 +70,42 @@ PRESETS = {
             "-c:a", "aac", "-b:a", "128k",
             str(o)
         ]
-    }
+    },
+    "h265_cpu": {
+        "label": "H.265 CPU",
+        "detail": "libx265 · CRF 28 · 1080p · 24 cores",
+        "cmd": lambda i, o: [
+            "ffmpeg", "-y", "-i", str(i),
+            "-c:v", "libx265", "-crf", "28",
+            "-vf", "scale=-2:1080",
+            "-c:a", "aac", "-b:a", "128k",
+            str(o)
+        ]
+    },
+    "h265_gpu": {
+        "label": "H.265 GPU",
+        "detail": "hevc_vaapi · QP 28 · 1080p · AMD RX 7800 XT",
+        "cmd": lambda i, o: [
+            "ffmpeg", "-y",
+            "-vaapi_device", "/dev/dri/renderD128",
+            "-i", str(i),
+            "-vf", "scale=-2:1080,format=nv12,hwupload",
+            "-c:v", "hevc_vaapi", "-qp", "28",
+            "-c:a", "aac", "-b:a", "128k",
+            str(o)
+        ]
+    },
+    "av1_cpu": {
+        "label": "AV1 CPU",
+        "detail": "libsvtav1 · CRF 30 · 1080p · 24 cores",
+        "cmd": lambda i, o: [
+            "ffmpeg", "-y", "-i", str(i),
+            "-c:v", "libsvtav1", "-crf", "30",
+            "-vf", "scale=-2:1080",
+            "-c:a", "aac", "-b:a", "128k",
+            str(o)
+        ]
+    },
 }
 
 POLL_INTERVAL = 1.0
@@ -127,9 +163,10 @@ async def poll_during_task(stop_event: asyncio.Event) -> list:
 # --- Confidence ---
 
 def confidence(delta_w: float, poll_count: int) -> dict:
-    if delta_w > 5 and poll_count >= 10:
+    s = cfg.load()
+    if delta_w > s["conf_green_delta_w"] and poll_count >= s["conf_green_polls"]:
         return {"flag": "🟢", "label": "Repeatable"}
-    elif delta_w >= 2 or poll_count >= 5:
+    elif delta_w >= s["conf_yellow_delta_w"] or poll_count >= s["conf_yellow_polls"]:
         return {"flag": "🟡", "label": "Early insight"}
     else:
         return {"flag": "🔴", "label": "Need more data — delta near P110 noise floor"}
@@ -272,12 +309,16 @@ def analyse(cpu: dict, gpu: dict) -> dict:
 # --- Main entry points ---
 
 async def run_video_measurement(input_path: Path, job_id: str,
-                                preset_key: str) -> dict:
+                                preset_key: str, jobs: dict = None) -> dict:
+    s = cfg.load()
+    if jobs is not None: jobs[job_id]["stage"] = "baseline"
     stopped = focus_mode_enter()
-    baseline = await measure_baseline(polls=10)
+    baseline = await measure_baseline(polls=s["baseline_polls"])
     LOCK_FILE.write_text(job_id)
     try:
+        if jobs is not None: jobs[job_id]["stage"] = f"{preset_key}_encode"
         result = await run_single(input_path, job_id, preset_key, baseline)
+        if jobs is not None: jobs[job_id]["stage"] = "done"
     finally:
         LOCK_FILE.unlink(missing_ok=True)
         # Run focus_mode_exit in executor so it doesn't block event loop
@@ -292,19 +333,18 @@ async def run_video_measurement(input_path: Path, job_id: str,
     }
 
 async def run_both_measurement(input_path: Path, job_id: str, jobs: dict = None) -> dict:
+    s = cfg.load()
     if jobs is not None: jobs[job_id]["stage"] = "baseline"
     stopped = focus_mode_enter()
-    baseline = await measure_baseline(polls=10)
+    baseline = await measure_baseline(polls=s["baseline_polls"])
     LOCK_FILE.write_text(job_id)
     try:
         if jobs is not None: jobs[job_id]["stage"] = "cpu_encode"
         cpu_result = await run_single(input_path, job_id, "cpu", baseline)
         if jobs is not None: jobs[job_id]["stage"] = "rest"
-        # rest between runs — 60s to allow CPU thermals to stabilise
-        await asyncio.sleep(60)
+        await asyncio.sleep(s["video_cooldown_s"])
         if jobs is not None: jobs[job_id]["stage"] = "baseline_2"
-        # fresh baseline for GPU
-        gpu_baseline = await measure_baseline(polls=10)
+        gpu_baseline = await measure_baseline(polls=s["baseline_polls"])
         if jobs is not None: jobs[job_id]["stage"] = "gpu_encode"
         gpu_result = await run_single(input_path, job_id, "gpu", gpu_baseline)
     finally:
