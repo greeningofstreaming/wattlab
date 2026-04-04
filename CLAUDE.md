@@ -49,7 +49,7 @@ BouyguesBox (192.168.1.x)
 - Variables: `TAPO_EMAIL`, `TAPO_PASSWORD`, `TAPO_P110_IP`
 
 ## Installed Packages
-- Python: tapo==0.8.12, python-dotenv, fastapi, uvicorn, python-multipart, torch (CPU), diffusers, transformers, accelerate, pillow
+- Python: tapo==0.8.12, python-dotenv, fastapi, uvicorn, python-multipart, torch 2.5.1+rocm6.2, diffusers, transformers, accelerate, pillow
 - System: lm-sensors, ffmpeg 6.1.1, nmap
 - AI: Ollama 0.20.2 (systemd service, port 11434)
 - Models: tinyllama:latest (1.1B), mistral:latest (7B), x/z-image-turbo (12GB, GPU blocked), x/flux2-klein (5.7GB, CUDA/MLX only)
@@ -152,7 +152,7 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] Energy per image metric (0.2063 Wh first run, 🟢)
 - [x] Live image display as generated
 - [x] Prompt variation per run (random colour/mood modifier)
-- [ ] GPU image generation (blocked: z-image-turbo needs 11.9 GiB, card has 12 GiB with only 11.1 GiB available)
+- [x] GPU image generation — SD-Turbo via PyTorch ROCm, batch of 5 images, HSA_OVERRIDE_GFX_VERSION=11.0.0
 
 ### Phase 6 — Public Access (session 6)
 - [ ] nginx reverse proxy

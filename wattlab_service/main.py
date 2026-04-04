@@ -9,9 +9,9 @@ from dotenv import dotenv_values
 from tapo import ApiClient
 from video import run_video_measurement, run_both_measurement, run_video_measurement_path, run_both_measurement_path, UPLOAD_DIR, LOCK_FILE
 from sources import get_all_sources, PRELOADED
-from llm import run_llm_measurement, run_llm_batch_measurement, MODELS, TASKS
+from llm import run_llm_measurement, run_llm_batch_measurement, run_llm_both_measurement, MODELS, TASKS
 from persist import save_result, list_results, load_result, to_csv
-from image_gen import run_image_measurement, IMAGE_STEPS
+from image_gen import run_image_measurement, run_image_both_measurement, IMAGE_STEPS_CPU, IMAGE_STEPS_GPU, GPU_BATCH_SIZE
 import settings as cfg
 
 config = dotenv_values("/home/gos/wattlab/.env")
@@ -688,15 +688,19 @@ async def video_sources():
 # --- LLM job runner ---
 
 async def run_llm_job(job_id: str, model_key: str, task_key: str,
-                      repeats: int = 1, warm: bool = False, prompt: str = None):
+                      repeats: int = 1, warm: bool = False, prompt: str = None,
+                      device: str = "gpu"):
     try:
         jobs[job_id] = {"status": "running", "stage": "baseline", "partial_response": ""}
-        if repeats > 1:
+        if device == "both":
+            result = await run_llm_both_measurement(
+                model_key, task_key, jobs, job_id, warm, prompt)
+        elif repeats > 1:
             result = await run_llm_batch_measurement(
                 model_key, task_key, repeats, warm, prompt, jobs, job_id)
         else:
             result = await run_llm_measurement(
-                model_key, task_key, jobs, job_id, warm, prompt)
+                model_key, task_key, jobs, job_id, warm, prompt, device)
         save_result("llm", job_id, result)
         jobs[job_id] = {"status": "done", "stage": "done", "result": result}
     except Exception as e:
@@ -810,6 +814,27 @@ async def llm_page():
     <div style="display:flex;gap:2rem;margin-bottom:1.5rem;flex-wrap:wrap">
         <div>
             <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+                        letter-spacing:0.05em;margin-bottom:0.5rem">Backend</div>
+            <div style="display:flex;gap:0.75rem">
+                <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
+                    <input type="radio" name="device" value="gpu" checked
+                           onchange="selectedDevice='gpu'" style="accent-color:#00ff99"> GPU
+                </label>
+                <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
+                    <input type="radio" name="device" value="cpu"
+                           onchange="selectedDevice='cpu'" style="accent-color:#00ff99"> CPU
+                </label>
+                <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
+                    <input type="radio" name="device" value="both"
+                           onchange="selectedDevice='both'" style="accent-color:#00ff99"> Both ⚡
+                </label>
+            </div>
+            <div style="color:#333;font-size:0.72rem;margin-top:0.3rem">
+                Both: CPU then GPU with new baseline — full side-by-side comparison
+            </div>
+        </div>
+        <div>
+            <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
                         letter-spacing:0.05em;margin-bottom:0.5rem">Mode</div>
             <div style="display:flex;gap:0.75rem">
                 <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
@@ -858,6 +883,7 @@ async def llm_page():
     let selectedTask = 'T1';
     let selectedWarm = false;
     let selectedRepeats = 1;
+    let selectedDevice = 'gpu';
     let startTime = null;
     let streamTimer = null;
 
@@ -884,12 +910,24 @@ async def llm_page():
     }}
 
     function renderProgress(stage) {{
-        // Normalise batch stages for display
+        // Normalise batch/both stages for display
+        const isBoth = stage.startsWith('baseline_cpu') || stage.startsWith('cpu_') ||
+                       stage.startsWith('baseline_gpu') || stage.startsWith('gpu_') ||
+                       stage === 'cooldown';
         const displayStage = stage.startsWith('inference_') ? 'inference' :
-                             stage.startsWith('rest_') ? 'rest' : stage;
+                             stage.startsWith('rest_') ? 'rest' :
+                             stage.startsWith('cpu_inference') ? 'cpu_inference' :
+                             stage.startsWith('gpu_inference') ? 'gpu_inference' : stage;
         const stageLabel = stage.startsWith('inference_') ? 'Running inference (' + stage.replace('inference_','').replace('_',' ') + ')' :
                            stage.startsWith('rest_') ? 'Resting between runs…' : null;
-        const stages = [
+        const stages = isBoth ? [
+            ['baseline_cpu', 'Measuring CPU baseline'],
+            ['cpu_inference', 'CPU inference (num_gpu=0)'],
+            ['cooldown', 'Cooldown between runs'],
+            ['baseline_gpu', 'Measuring GPU baseline'],
+            ['gpu_inference', 'GPU inference (ROCm)'],
+            ['done', 'Done'],
+        ] : [
             ['baseline', 'Measuring baseline'],
             ['inference', stageLabel || 'Running inference'],
             ['rest', 'Resting between runs…'],
@@ -930,6 +968,7 @@ async def llm_page():
         form.append('task_key', selectedTask);
         form.append('repeats', selectedRepeats);
         form.append('warm', selectedWarm ? 'true' : 'false');
+        form.append('device', selectedDevice);
         const promptVal = document.getElementById('promptText').value.trim();
         if (promptVal) form.append('prompt', promptVal);
 
@@ -1001,7 +1040,9 @@ async def llm_page():
             Total elapsed: ${{elapsed}}</div>` : '';
 
         let body;
-        if (r.mode === 'batch') {{
+        if (r.mode === 'both') {{
+            body = renderLLMBoth(r);
+        }} else if (r.mode === 'batch') {{
             body = renderLLMBatch(r);
         }} else {{
             body = renderLLMSingle(r);
@@ -1098,6 +1139,50 @@ async def llm_page():
             </div>`;
     }}
 
+    function renderLLMBoth(r) {{
+        const a = r.analysis;
+        const cpu = r.cpu, gpu = r.gpu;
+        const ce = cpu.energy, ge = gpu.energy;
+        const ci = cpu.inference, gi = gpu.inference;
+        const winnerColor = (winner, side) => winner === side ? '#00ff99' : '#888';
+        return `<div class="result-box">
+            <h2>CPU vs GPU — ${{r.model_label}} · ${{r.task_label}}</h2>
+            <div style="background:#0d1a0d;border:1px solid #00ff9933;
+                        padding:1rem;margin-bottom:1.25rem;font-size:0.82rem;line-height:1.7">
+              ${{a.finding}}
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.25rem">
+              <div style="border:1px solid #222;padding:1rem">
+                <div style="color:#888;font-size:0.72rem;margin-bottom:0.75rem">CPU (num_gpu=0 · Ryzen 9 7900)</div>
+                <div class="metric"><span>Tokens/sec</span>
+                  <span class="val" style="color:${{winnerColor(a.speed_winner,'CPU')}}">${{ci.tokens_per_sec}}</span></div>
+                <div class="metric"><span>Duration</span><span class="val">${{ci.duration_s}}s</span></div>
+                <div class="metric"><span>ΔE total</span>
+                  <span class="val" style="color:${{winnerColor(a.energy_winner,'CPU')}}">${{ce.delta_e_wh}} Wh</span></div>
+                <div class="metric"><span>mWh/token</span>
+                  <span class="val" style="color:${{winnerColor(a.mwh_winner,'CPU')}}">${{ce.mwh_per_token}}</span></div>
+                <div class="metric"><span>ΔW</span><span class="val">${{ce.delta_w}} W</span></div>
+                <div style="margin-top:0.5rem">${{ce.confidence.flag}} ${{ce.confidence.label}}</div>
+              </div>
+              <div style="border:1px solid #222;padding:1rem">
+                <div style="color:#888;font-size:0.72rem;margin-bottom:0.75rem">GPU (ROCm · RX 7800 XT)</div>
+                <div class="metric"><span>Tokens/sec</span>
+                  <span class="val" style="color:${{winnerColor(a.speed_winner,'GPU')}}">${{gi.tokens_per_sec}}</span></div>
+                <div class="metric"><span>Duration</span><span class="val">${{gi.duration_s}}s</span></div>
+                <div class="metric"><span>ΔE total</span>
+                  <span class="val" style="color:${{winnerColor(a.energy_winner,'GPU')}}">${{ge.delta_e_wh}} Wh</span></div>
+                <div class="metric"><span>mWh/token</span>
+                  <span class="val" style="color:${{winnerColor(a.mwh_winner,'GPU')}}">${{ge.mwh_per_token}}</span></div>
+                <div class="metric"><span>ΔW</span><span class="val">${{ge.delta_w}} W</span></div>
+                <div style="margin-top:0.5rem">${{ge.confidence.flag}} ${{ge.confidence.label}}</div>
+              </div>
+            </div>
+            <div class="section-title">GPU response preview</div>
+            <div class="response-box">${{gi.response}}</div>
+            <div class="scope-note">${{r.scope}}</div>
+        </div>`;
+    }}
+
     async function loadPrevRuns() {{
         try {{
             const resp = await fetch('/results/llm/list');
@@ -1146,20 +1231,24 @@ async def llm_run(
     repeats: int = Form(1),
     warm: bool = Form(False),
     prompt: str = Form(None),
+    device: str = Form("gpu"),
 ):
     if model_key not in MODELS:
         return JSONResponse({"error": "Invalid model"}, status_code=400)
     if task_key not in TASKS:
         return JSONResponse({"error": "Invalid task"}, status_code=400)
+    if device not in ("cpu", "gpu", "both"):
+        return JSONResponse({"error": "device must be cpu, gpu, or both"}, status_code=400)
     if repeats not in (1, 3, 5):
         return JSONResponse({"error": "repeats must be 1, 3, or 5"}, status_code=400)
 
     effective_prompt = prompt.strip() if prompt and prompt.strip() else None
     job_id = str(uuid.uuid4())[:8]
-    label = f"LLM — {MODELS[model_key]['label']} · {TASKS[task_key]['label']}"
+    device_label = "CPU vs GPU" if device == "both" else device.upper()
+    label = f"LLM — {MODELS[model_key]['label']} · {TASKS[task_key]['label']} · {device_label}"
 
     async def coro():
-        await run_llm_job(job_id, model_key, task_key, repeats, warm, effective_prompt)
+        await run_llm_job(job_id, model_key, task_key, repeats, warm, effective_prompt, device)
 
     position = enqueue(job_id, "llm", label, coro)
     return {"job_id": job_id, "queue_position": position}
@@ -2235,13 +2324,12 @@ async def image_page():
     <a href="/" class="back">← back to dashboard</a>
     {busy_banner}
     <h1>Image Generation Test</h1>
-    <div class="subtitle">CPU diffusion · SD-Turbo · {IMAGE_STEPS} steps · 512×512 · Ryzen 9 7900</div>
+    <div class="subtitle">SD-Turbo · CPU {IMAGE_STEPS_CPU} steps / GPU {IMAGE_STEPS_GPU} steps × {GPU_BATCH_SIZE} images · 512×512</div>
     <div class="info">
         Measures the wall-power cost of generating one AI image from text.<br>
-        Each run appends a random colour/mood modifier — a live proof that
-        generation is happening, not replaying a cached result.<br>
-        Model: <code>stabilityai/sd-turbo</code> (CPU, ~14s/image).
-        GPU image generation deferred — model requires 12GB VRAM, card has 12GB.
+        CPU: {IMAGE_STEPS_CPU} steps (~12s). GPU: batch of {GPU_BATCH_SIZE} images × {IMAGE_STEPS_GPU} steps (~10s total) → energy per image = total/{GPU_BATCH_SIZE}.<br>
+        Each run appends a random colour/mood modifier — live proof the image is generated, not replayed.<br>
+        Model: <code>stabilityai/sd-turbo</code> · GPU backend: ROCm (<code>HSA_OVERRIDE_GFX_VERSION=11.0.0</code>)
     </div>
 
     <label style="color:#888;font-size:0.8rem;display:block;margin-bottom:0.4rem">Prompt</label>
@@ -2250,19 +2338,40 @@ async def image_page():
         A random colour/mood modifier is appended per run (e.g. "bathed in emerald light").
     </div>
 
+    <div style="margin-bottom:1.25rem">
+      <span style="color:#888;font-size:0.8rem;margin-right:1rem">Backend:</span>
+      <label style="font-size:0.85rem;margin-right:1.2rem;cursor:pointer">
+        <input type="radio" name="img-device" value="cpu" checked onchange="selectedDevice=this.value"> CPU
+      </label>
+      <label style="font-size:0.85rem;margin-right:1.2rem;cursor:pointer">
+        <input type="radio" name="img-device" value="gpu" onchange="selectedDevice=this.value"> GPU
+      </label>
+      <label style="font-size:0.85rem;cursor:pointer">
+        <input type="radio" name="img-device" value="both" onchange="selectedDevice=this.value"> Both ⚡
+      </label>
+    </div>
+
     <button id="run-btn" onclick="startMeasurement()">Generate &amp; Measure</button>
     <div id="status"></div>
     {prev_html}
     </div>
 
 <script>
-const STAGES = ['baseline','generating','done'];
+const CPU_STAGES = ['baseline','generating','done'];
+const GPU_STAGES = ['baseline','generating','done'];
+const BOTH_STAGES = ['cpu_baseline','cpu_generating','cooldown','gpu_baseline','gpu_generating','done'];
 const STAGE_LABELS = {{
   'baseline': 'Measuring baseline power',
-  'generating': 'Generating image (CPU diffusion)',
+  'generating': 'Generating image',
+  'cpu_baseline': 'CPU — measuring baseline',
+  'cpu_generating': 'CPU — generating image',
+  'cooldown': 'Cooldown between passes',
+  'gpu_baseline': 'GPU — measuring baseline',
+  'gpu_generating': 'GPU — generating images (batch)',
   'done': 'Complete',
 }};
 let pollTimer = null;
+let selectedDevice = 'cpu';
 
 function fmt(v, dp=2) {{
   if (v === null || v === undefined) return '—';
@@ -2279,7 +2388,7 @@ async function startMeasurement() {{
   const resp = await fetch('/image/start', {{
     method: 'POST',
     headers: {{'Content-Type':'application/x-www-form-urlencoded'}},
-    body: 'prompt=' + encodeURIComponent(prompt)
+    body: 'prompt=' + encodeURIComponent(prompt) + '&device=' + encodeURIComponent(selectedDevice)
   }});
   const data = await resp.json();
   if (data.error) {{ alert(data.error); document.getElementById('run-btn').disabled=false; return; }}
@@ -2308,7 +2417,8 @@ async function pollJob(jobId) {{
 
   if (j.stage === 'done' && j.result) {{
     clearInterval(pollTimer);
-    renderResult(j.result);
+    if (j.result.mode === 'both') renderImageBoth(j.result);
+    else renderResult(j.result);
     document.getElementById('run-btn').disabled = false;
   }}
   if (j.error) {{
@@ -2320,9 +2430,11 @@ async function pollJob(jobId) {{
 }}
 
 function renderProgress(stage, result, watts) {{
-  const stageIdx = STAGES.indexOf(stage);
+  const isBoth = BOTH_STAGES.includes(stage) && stage !== 'done';
+  const stages = isBoth ? BOTH_STAGES : CPU_STAGES;
+  const stageIdx = stages.indexOf(stage);
   let stagesHtml = '';
-  STAGES.forEach((s, i) => {{
+  stages.forEach((s, i) => {{
     let icon = i < stageIdx ? '✓' : (i === stageIdx ? '⏳' : '·');
     let col = i < stageIdx ? '#00ff99' : (i === stageIdx ? '#ffaa00' : '#333');
     stagesHtml += `<div class="stage">
@@ -2342,9 +2454,52 @@ function renderProgress(stage, result, watts) {{
     </div>`;
 }}
 
+function _imageCard(label, pass_r, isWinner) {{
+  const e = pass_r.energy;
+  const gen = pass_r.generation;
+  const borderCol = isWinner ? '#00ff9966' : '#222';
+  const imgHtml = gen.b64_png
+    ? `<div style="margin-top:0.75rem"><img src="data:image/png;base64,${{gen.b64_png}}" style="max-width:180px;border:1px solid #222"></div>`
+    : '';
+  return `<div style="border:1px solid ${{borderCol}};padding:1rem;flex:1;min-width:220px">
+    <div style="color:${{isWinner?'#00ff99':'#777'}};font-size:0.85rem;font-weight:bold;margin-bottom:0.75rem">${{label}}${{isWinner?' 🏆':''}}</div>
+    <div class="kpis">
+      <div class="kpi"><div class="val" style="font-size:1.15rem">${{fmt(e.wh_per_image,4)}} Wh</div><div class="lbl">per image</div></div>
+      <div class="kpi"><div class="val" style="font-size:1.15rem">${{fmt(gen.gen_s_per_image,1)}} s</div><div class="lbl">gen/image</div></div>
+      <div class="kpi"><div class="val" style="font-size:1.1rem">${{fmt(e.delta_w,1)}} W</div><div class="lbl">delta W</div></div>
+      <div class="kpi"><div class="val" style="font-size:1.1rem">${{e.poll_count}}</div><div class="lbl">polls</div></div>
+    </div>
+    <div style="font-size:0.78rem;color:#555;margin-top:0.5rem">${{e.confidence.flag}} ${{e.confidence.label}} · ${{gen.batch_size}}×${{gen.steps}} steps</div>
+    ${{imgHtml}}
+  </div>`;
+}}
+
+function renderImageBoth(r) {{
+  const a = r.analysis;
+  const cpuWinsEnergy = a.energy_winner === 'cpu';
+  const gpuWinsEnergy = a.energy_winner === 'gpu';
+  document.getElementById('status').innerHTML = `
+    <div class="result-box">
+      <h2>CPU vs GPU — Image Generation</h2>
+      <div style="background:#111;border:1px solid #333;padding:0.75rem 1rem;margin-bottom:1.25rem;font-size:0.85rem;color:#ccc">
+        ${{a.finding}}
+      </div>
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+        ${{_imageCard('CPU · Ryzen 9 7900', r.cpu, cpuWinsEnergy)}}
+        ${{_imageCard('GPU · RX 7800 XT', r.gpu, gpuWinsEnergy)}}
+      </div>
+      <div style="font-size:0.75rem;color:#444;margin-top:0.5rem">
+        Prompt: "${{r.full_prompt}}" · modifier: <em>${{r.modifier}}</em>
+      </div>
+      <p class="scope-note">${{r.scope}}</p>
+    </div>`;
+}}
+
 function renderResult(r) {{
   const e = r.energy;
   const gen = r.generation;
+  const batch = gen.batch_size || 1;
+  const batchNote = batch > 1 ? ` (batch of ${{batch}})` : '';
   const imgHtml = gen.b64_png
     ? `<div class="image-preview">
          <img src="data:image/png;base64,${{gen.b64_png}}" alt="Generated image">
@@ -2356,7 +2511,7 @@ function renderResult(r) {{
       <h2>Result</h2>
       <div class="kpis">
         <div class="kpi">
-          <div class="val">${{fmt(e.delta_e_wh,4)}} Wh</div>
+          <div class="val">${{fmt(e.wh_per_image,4)}} Wh</div>
           <div class="lbl">energy / image</div>
         </div>
         <div class="kpi">
@@ -2364,12 +2519,12 @@ function renderResult(r) {{
           <div class="lbl">delta above idle</div>
         </div>
         <div class="kpi">
-          <div class="val">${{fmt(gen.total_s,1)}} s</div>
-          <div class="lbl">generation time</div>
+          <div class="val">${{fmt(gen.gen_s_per_image,1)}} s</div>
+          <div class="lbl">gen time / image${{batchNote}}</div>
         </div>
         <div class="kpi">
-          <div class="val">${{fmt(gen.load_s,1)}} s / ${{fmt(gen.gen_s,1)}} s</div>
-          <div class="lbl">load / diffusion</div>
+          <div class="val">${{fmt(gen.load_s,1)}} s</div>
+          <div class="lbl">model load</div>
         </div>
         <div class="kpi">
           <div class="val">${{e.poll_count}}</div>
@@ -2390,13 +2545,18 @@ function renderResult(r) {{
 
 
 @app.post("/image/start")
-async def image_start(prompt: str = Form(...)):
+async def image_start(prompt: str = Form(...), device: str = Form("cpu")):
+    if device not in ("cpu", "gpu", "both"):
+        device = "cpu"
     job_id = uuid.uuid4().hex[:8]
-    label = f"Image — {prompt[:40]}"
+    label = f"Image ({device.upper()}) — {prompt[:35]}"
 
     async def coro():
         try:
-            result = await run_image_measurement(prompt, job_id, jobs)
+            if device == "both":
+                result = await run_image_both_measurement(prompt, job_id, jobs)
+            else:
+                result = await run_image_measurement(prompt, job_id, jobs, device=device)
             save_result("image", job_id, result)
             jobs[job_id]["result"] = result
         except Exception as e:

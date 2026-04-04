@@ -49,6 +49,42 @@ TinyLlama ~15x more energy efficient per token than Mistral. TinyLlama too fast 
 
 ---
 
+## Session 4 — 2026-04-04
+
+### What we built
+
+**LLM CPU vs GPU comparison**
+- Added Backend selector to `/llm` page: CPU / GPU / Both ⚡
+- GPU mode: standard Ollama inference (ROCm, default)
+- CPU mode: `"options": {"num_gpu": 0}` forces Ollama to use CPU only
+- Both mode: CPU pass → cooldown → re-baseline → GPU pass → side-by-side result card with winner highlighting
+- New `run_llm_both_measurement()` in `llm.py`, new `_analyse_llm()` for comparison
+- New `renderLLMBoth()` JS function: speed winner (green) vs loser (grey), energy winner highlighted
+
+**Image generation CPU vs GPU**
+- `HSA_OVERRIDE_GFX_VERSION=11.0.0` set at module level and in systemd service — required for RX 7800 XT (gfx1101) with PyTorch ROCm 2.5.1
+- GPU strategy: batch of 5 images × 20 steps (~10s total) → `wh_per_image = total_energy / 5`
+  (GPU generates in ~2s/image — too fast for reliable P110 measurement at 1s polling interval)
+- CPU strategy unchanged: 8 steps, ~12s per image, single image
+- Added `device` param to `generate_image()`, `run_image_measurement()`, new `run_image_both_measurement()`
+- Added `_analyse_image()` for comparison: energy_winner, speed_winner, speed/energy diff %
+- Added CPU / GPU / Both radio selector to `/image` page
+- New `renderImageBoth()` JS: side-by-side CPU/GPU cards, winner badge, batch note
+- Both pages now fully symmetric: same UI pattern as LLM page
+
+### Key GPU Image Finding (first run — to be measured)
+- GPU JIT compilation: ~74s one-time cost on first PyTorch ROCm call (kernels cached to disk)
+- Expected GPU: ~2s/image × 5 batch = ~10s measurement window, ≥10 P110 polls
+- Expected CPU: ~12s/image, ≥10 P110 polls
+
+### Architecture notes
+- `IMAGE_STEPS_CPU = 8`, `IMAGE_STEPS_GPU = 20`, `GPU_BATCH_SIZE = 5`
+- `_run_single_image()`: shared internal helper for both-mode passes
+- `_calc_energy()`: shared energy calculation, handles batch normalisation
+- Energy measurement uses `gen_s` (generation only), not `total_s` (excludes model load)
+
+---
+
 ## Session 3 — 2026-04-04
 
 ### What we built (Phase 4 + Phase 5)

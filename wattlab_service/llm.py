@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import subprocess
 import time
 import json
@@ -101,13 +102,13 @@ def unload_model(model: str):
 
 # --- Ollama inference ---
 
-def run_inference_streaming(model: str, prompt: str, on_token=None) -> dict:
-    """Stream inference token by token. Calls on_token(str) with each chunk."""
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": True,
-    }).encode()
+def run_inference_streaming(model: str, prompt: str, on_token=None,
+                            num_gpu: int = -1) -> dict:
+    """Stream inference token by token. num_gpu=0 forces CPU; -1 = Ollama default (GPU)."""
+    payload_dict = {"model": model, "prompt": prompt, "stream": True}
+    if num_gpu == 0:
+        payload_dict["options"] = {"num_gpu": 0}
+    payload = json.dumps(payload_dict).encode()
     req = urllib.request.Request(
         OLLAMA_URL, data=payload,
         headers={"Content-Type": "application/json"}, method="POST"
@@ -147,64 +148,48 @@ def run_inference_streaming(model: str, prompt: str, on_token=None) -> dict:
 
 # --- Main measurement ---
 
-async def run_llm_measurement(model_key: str, task_key: str,
-                               jobs: dict = None, job_id: str = None,
-                               warm: bool = False, prompt: str = None) -> dict:
+async def _run_single_inference(model_key: str, task_key: str,
+                                baseline: float, sensors_base: dict,
+                                device: str, effective_prompt: str,
+                                jobs: dict, job_id: str,
+                                stage_prefix: str) -> dict:
+    """Run one inference pass against an already-measured baseline."""
     model = MODELS[model_key]
     task = TASKS[task_key]
-    effective_prompt = prompt or task["prompt"]
+    num_gpu = 0 if device == "cpu" else -1
 
-    s = cfg.load()
-    if jobs and job_id: jobs[job_id]["stage"] = "baseline"
-    if not warm:
-        unload_model(model_key)
-        await asyncio.sleep(s["llm_unload_settle_s"])
-    w_base = await measure_baseline(polls=s["baseline_polls"])
-    sensors_base = read_sensors()
-
-    LOCK_FILE.write_text(job_id or "llm")
-
-    stop_event = asyncio.Event()
     if jobs and job_id:
-        jobs[job_id]["stage"] = "inference"
+        jobs[job_id]["stage"] = f"{stage_prefix}_inference"
         jobs[job_id]["partial_response"] = ""
 
     def on_token(t):
         if jobs and job_id:
-            jobs[job_id]["partial_response"] = jobs[job_id].get("partial_response", "") + t
+            jobs[job_id]["partial_response"] = \
+                jobs[job_id].get("partial_response", "") + t
 
+    stop_event = asyncio.Event()
     poll_task = asyncio.create_task(poll_during_task(stop_event))
-    inference_result = await asyncio.get_event_loop().run_in_executor(
-        None, run_inference_streaming, model_key, effective_prompt, on_token
-    )
+    fn = functools.partial(run_inference_streaming, model_key,
+                           effective_prompt, on_token, num_gpu)
+    inference_result = await asyncio.get_event_loop().run_in_executor(None, fn)
     stop_event.set()
     readings = await poll_task
 
-    LOCK_FILE.unlink(missing_ok=True)
-    if jobs and job_id: jobs[job_id]["stage"] = "done"
-
     sensors_end = read_sensors()
-
     delta_t = inference_result["duration_s"]
-    w_task = sum(r[1] for r in readings) / len(readings) if readings else w_base
-    delta_w = round(w_task - w_base, 2)
+    w_task = sum(r[1] for r in readings) / len(readings) if readings else baseline
+    delta_w = round(w_task - baseline, 2)
     delta_e_wh = round(delta_w * (delta_t / 3600), 4)
     output_tokens = inference_result["output_tokens"]
-    mwh_per_token = round((delta_e_wh * 1000) / max(output_tokens, 1), 4) if output_tokens else None
+    mwh_per_token = round((delta_e_wh * 1000) / max(output_tokens, 1), 4) \
+        if output_tokens else None
     conf = confidence(delta_w, len(readings))
 
     return {
-        "mode": "single",
-        "model_key": model_key,
-        "model_label": model["label"],
-        "model_params": model["params"],
-        "task_key": task_key,
-        "task_label": task["label"],
-        "prompt": effective_prompt,
-        "warm": warm,
+        "device": device,
         "inference": inference_result,
         "energy": {
-            "w_base": w_base,
+            "w_base": round(baseline, 2),
             "w_task": round(w_task, 2),
             "delta_w": delta_w,
             "delta_t_s": delta_t,
@@ -219,7 +204,143 @@ async def run_llm_measurement(model_key: str, task_key: str,
             "cpu_end": sensors_end.get("cpu_tctl"),
             "gpu_end": sensors_end.get("gpu_junction"),
         },
+    }
+
+
+async def run_llm_measurement(model_key: str, task_key: str,
+                               jobs: dict = None, job_id: str = None,
+                               warm: bool = False, prompt: str = None,
+                               device: str = "gpu") -> dict:
+    model = MODELS[model_key]
+    task = TASKS[task_key]
+    effective_prompt = prompt or task["prompt"]
+
+    s = cfg.load()
+    if jobs and job_id: jobs[job_id]["stage"] = "baseline"
+    if not warm:
+        unload_model(model_key)
+        await asyncio.sleep(s["llm_unload_settle_s"])
+    w_base = await measure_baseline(polls=s["baseline_polls"])
+    sensors_base = read_sensors()
+
+    LOCK_FILE.write_text(job_id or "llm")
+    result = await _run_single_inference(
+        model_key, task_key, w_base, sensors_base,
+        device, effective_prompt, jobs, job_id, device
+    )
+    LOCK_FILE.unlink(missing_ok=True)
+    if jobs and job_id: jobs[job_id]["stage"] = "done"
+
+    return {
+        "mode": "single",
+        "model_key": model_key,
+        "model_label": model["label"],
+        "model_params": model["params"],
+        "task_key": task_key,
+        "task_label": task["label"],
+        "prompt": effective_prompt,
+        "warm": warm,
+        "device": device,
+        "inference": result["inference"],
+        "energy": result["energy"],
+        "thermals": result["thermals"],
         "scope": "Device layer only (GoS1). Network and CPE excluded. No amortised training cost.",
+    }
+
+
+async def run_llm_both_measurement(model_key: str, task_key: str,
+                                    jobs: dict = None, job_id: str = None,
+                                    warm: bool = False, prompt: str = None) -> dict:
+    """Run CPU then GPU sequentially, new baseline between, return comparison."""
+    model = MODELS[model_key]
+    task = TASKS[task_key]
+    effective_prompt = prompt or task["prompt"]
+    s = cfg.load()
+
+    # --- CPU pass ---
+    if jobs and job_id: jobs[job_id]["stage"] = "baseline_cpu"
+    if not warm:
+        unload_model(model_key)
+        await asyncio.sleep(s["llm_unload_settle_s"])
+    w_base_cpu = await measure_baseline(polls=s["baseline_polls"])
+    sensors_base_cpu = read_sensors()
+
+    LOCK_FILE.write_text(job_id or "llm")
+    cpu_result = await _run_single_inference(
+        model_key, task_key, w_base_cpu, sensors_base_cpu,
+        "cpu", effective_prompt, jobs, job_id, "cpu"
+    )
+
+    # --- Cooldown + re-baseline ---
+    if jobs and job_id: jobs[job_id]["stage"] = "cooldown"
+    await asyncio.sleep(s["video_cooldown_s"])
+
+    if jobs and job_id: jobs[job_id]["stage"] = "baseline_gpu"
+    unload_model(model_key)
+    await asyncio.sleep(s["llm_unload_settle_s"])
+    w_base_gpu = await measure_baseline(polls=s["baseline_polls"])
+    sensors_base_gpu = read_sensors()
+
+    # --- GPU pass ---
+    gpu_result = await _run_single_inference(
+        model_key, task_key, w_base_gpu, sensors_base_gpu,
+        "gpu", effective_prompt, jobs, job_id, "gpu"
+    )
+    LOCK_FILE.unlink(missing_ok=True)
+    if jobs and job_id: jobs[job_id]["stage"] = "done"
+
+    analysis = _analyse_llm(cpu_result, gpu_result)
+
+    return {
+        "mode": "both",
+        "model_key": model_key,
+        "model_label": model["label"],
+        "model_params": model["params"],
+        "task_key": task_key,
+        "task_label": task["label"],
+        "prompt": effective_prompt,
+        "warm": warm,
+        "cpu": cpu_result,
+        "gpu": gpu_result,
+        "analysis": analysis,
+        "scope": "Device layer only (GoS1). Network and CPE excluded. No amortised training cost.",
+    }
+
+
+def _analyse_llm(cpu: dict, gpu: dict) -> dict:
+    ce = cpu["energy"]
+    ge = gpu["energy"]
+    ci = cpu["inference"]
+    gi = gpu["inference"]
+
+    speed_winner = "GPU" if gi["tokens_per_sec"] > ci["tokens_per_sec"] else "CPU"
+    energy_winner = "GPU" if ge["delta_e_wh"] < ce["delta_e_wh"] else "CPU"
+    mwh_winner = "GPU" if (ge["mwh_per_token"] or 999) < (ce["mwh_per_token"] or 999) else "CPU"
+
+    speed_diff_pct = round(abs(gi["tokens_per_sec"] - ci["tokens_per_sec"]) /
+                           max(ci["tokens_per_sec"], 0.01) * 100, 1)
+    energy_diff_pct = round(abs(ce["delta_e_wh"] - ge["delta_e_wh"]) /
+                            max(ce["delta_e_wh"], ge["delta_e_wh"], 0.0001) * 100, 1)
+
+    finding = (
+        f"{speed_winner} was {speed_diff_pct}% faster "
+        f"({gi['tokens_per_sec']} vs {ci['tokens_per_sec']} tok/s). "
+        f"{energy_winner} used {energy_diff_pct}% less total energy "
+        f"({ce['delta_e_wh']:.4f} vs {ge['delta_e_wh']:.4f} Wh). "
+    )
+    if ce["mwh_per_token"] and ge["mwh_per_token"]:
+        finding += (
+            f"{mwh_winner} was more efficient per token "
+            f"({ce['mwh_per_token']:.4f} vs {ge['mwh_per_token']:.4f} mWh/token)."
+        )
+
+    return {
+        "speed_winner": speed_winner,
+        "energy_winner": energy_winner,
+        "mwh_winner": mwh_winner,
+        "speed_diff_pct": speed_diff_pct,
+        "energy_diff_pct": energy_diff_pct,
+        "finding": finding,
     }
 
 
