@@ -7,6 +7,7 @@ from dotenv import dotenv_values
 from tapo import ApiClient
 from video import run_video_measurement, run_both_measurement, run_video_measurement_path, run_both_measurement_path, UPLOAD_DIR, LOCK_FILE
 from sources import get_all_sources, PRELOADED
+from llm import run_llm_measurement, MODELS, TASKS
 
 config = dotenv_values("/home/gos/wattlab/.env")
 app = FastAPI()
@@ -50,6 +51,7 @@ async def index():
     <div class="scope">Device layer only · Tapo P110 · refreshes every 10s</div>
     <div class="nav">
         <a href="/video">▶ Video transcode test</a>
+        <a href="/llm">▶ LLM inference test</a>
     </div>
 </body>
 </html>"""
@@ -510,6 +512,266 @@ async def upload_video(
 @app.get("/video/sources")
 async def video_sources():
     return get_all_sources()
+
+
+# --- LLM job runner ---
+
+async def run_llm_job(job_id: str, model_key: str, task_key: str):
+    try:
+        jobs[job_id] = {"status": "running", "stage": "baseline"}
+        result = await run_llm_measurement(model_key, task_key, jobs, job_id)
+        jobs[job_id] = {"status": "done", "stage": "done", "result": result}
+    except Exception as e:
+        jobs[job_id] = {"status": "error", "stage": "error", "error": str(e)}
+
+@app.get("/llm", response_class=HTMLResponse)
+async def llm_page():
+    models_html = "".join([
+        f'''<div class="preset" id="model-{k}" onclick="selectModel('{k}')">
+            <h3>{v["label"]}</h3>
+            <p style="color:#555;font-size:0.75rem">{v["params"]} · {v["size"]}</p>
+        </div>'''
+        for k, v in MODELS.items()
+    ])
+
+    tasks_html = "".join([
+        f'''<label style="display:flex;gap:0.75rem;border:1px solid #333;
+                     padding:0.75rem;cursor:pointer;margin-bottom:0.5rem">
+            <input type="radio" name="task" value="{k}"
+                   {"checked" if k == "T1" else ""}
+                   onchange="selectedTask='{k}'"
+                   style="accent-color:#00ff99;margin-top:0.2rem">
+            <div>
+                <div style="color:#e0e0e0;font-size:0.85rem">{v["label"]}</div>
+                <div style="color:#555;font-size:0.75rem">{v["prompt"][:80]}...</div>
+            </div>
+        </label>'''
+        for k, v in TASKS.items()
+    ])
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>WattLab — LLM Inference Test</title>
+    <style>
+        * {{ box-sizing:border-box; margin:0; padding:0; }}
+        body {{ font-family:monospace; background:#0a0a0a; color:#e0e0e0;
+               max-width:780px; margin:0 auto; padding:2rem; }}
+        h1 {{ color:#00ff99; margin-bottom:0.25rem; font-size:1.6rem; }}
+        .subtitle {{ color:#555; font-size:0.8rem; margin-bottom:1.5rem; }}
+        .info {{ color:#777; font-size:0.82rem; margin-bottom:1.5rem;
+                 border-left:2px solid #222; padding-left:1rem; line-height:1.6; }}
+        .presets {{ display:flex; gap:0.75rem; margin-bottom:1.5rem; }}
+        .preset {{ border:1px solid #333; padding:1rem; cursor:pointer; flex:1; }}
+        .preset:hover {{ border-color:#00ff9966; }}
+        .preset.selected {{ border-color:#00ff99; background:#00ff9911; }}
+        .preset h3 {{ color:#00ff99; font-size:0.9rem; margin-bottom:0.4rem; }}
+        .section-label {{ color:#555; font-size:0.75rem; text-transform:uppercase;
+                          letter-spacing:0.05em; margin-bottom:0.75rem; }}
+        button {{ background:#00ff99; color:#000; border:none; padding:0.75rem 2rem;
+                  cursor:pointer; font-family:monospace; font-size:1rem; margin-top:1rem; }}
+        button:disabled {{ background:#222; color:#555; cursor:not-allowed; }}
+        button:hover:not(:disabled) {{ background:#00dd88; }}
+        #status {{ margin-top:1.5rem; }}
+        .result-box {{ border:1px solid #222; padding:1.5rem; }}
+        .result-box h2 {{ color:#00ff99; font-size:1.1rem; margin-bottom:1rem;
+                          padding-bottom:0.5rem; border-bottom:1px solid #222; }}
+        .metric {{ display:flex; justify-content:space-between;
+                   padding:0.3rem 0; border-bottom:1px solid #111; font-size:0.82rem; }}
+        .val {{ color:#00ff99; }}
+        .section-title {{ color:#444; font-size:0.72rem; text-transform:uppercase;
+                          letter-spacing:0.05em; margin:0.75rem 0 0.4rem; }}
+        .response-box {{ background:#111; padding:1rem; margin-top:0.75rem;
+                         font-size:0.8rem; color:#aaa; line-height:1.6;
+                         border-left:2px solid #00ff9944; max-height:200px;
+                         overflow-y:auto; }}
+        .scope-note {{ color:#333; font-size:0.72rem; margin-top:1rem; }}
+        .progress-box {{ border:1px solid #222; padding:1.5rem; }}
+        .progress-header {{ color:#ffaa00; font-size:0.9rem; margin-bottom:1rem; }}
+        .stage {{ display:flex; align-items:center; gap:0.75rem;
+                  font-size:0.82rem; margin-bottom:0.4rem; }}
+        .stage.active .stage-label {{ color:#ffaa00; }}
+        .stage.done .stage-label {{ color:#00ff99; }}
+        .stage.pending .stage-label {{ color:#333; }}
+        a.back {{ color:#555; text-decoration:none; font-size:0.82rem;
+                  display:inline-block; margin-top:1.5rem; }}
+        a.back:hover {{ color:#00ff99; }}
+    </style>
+</head>
+<body>
+    <h1>LLM Inference Energy Test</h1>
+    <div class="subtitle">Greening of Streaming · WattLab · GoS1</div>
+    <div class="info">
+        Fixed prompts for comparability · P110 at 1s intervals<br>
+        Energy per token (mWh/token) is the primary metric<br>
+        Scope: device layer only — no amortised training cost included
+    </div>
+
+    <div class="section-label">Model</div>
+    <div class="presets">{models_html}</div>
+
+    <div class="section-label">Task</div>
+    {tasks_html}
+
+    <button id="runBtn" onclick="runInference()">Run Measurement</button>
+    <div id="status"></div>
+    <a class="back" href="/">← Back to power monitor</a>
+
+    <script>
+    let selectedModel = 'tinyllama';
+    let selectedTask = 'T1';
+    let startTime = null;
+    let progressTimer = null;
+
+    // Select first model by default
+    document.getElementById('model-tinyllama').classList.add('selected');
+
+    function selectModel(key) {{
+        selectedModel = key;
+        // model selection handled by selectModel()
+        document.querySelectorAll('.preset').forEach(el => el.classList.remove('selected'));
+        document.getElementById('model-' + key).classList.add('selected');
+    }}
+
+    function formatElapsed(ms) {{
+        const s = Math.floor(ms / 1000);
+        const m = Math.floor(s / 60);
+        return m > 0 ? m + 'm ' + (s%60) + 's' : s + 's';
+    }}
+
+    function renderProgress(stage) {{
+        const stages = [
+            ['baseline', 'Measuring baseline'],
+            ['inference', 'Running inference'],
+            ['done', 'Done'],
+        ];
+        const stageHTML = stages.map(([key, label]) => {{
+            const state = stage === key ? 'active' :
+                stages.findIndex(s=>s[0]===key) < stages.findIndex(s=>s[0]===stage) ? 'done' : 'pending';
+            const icon = state === 'done' ? '✓' : state === 'active' ? '▶' : '·';
+            const color = state === 'done' ? '#00ff99' : state === 'active' ? '#ffaa00' : '#333';
+            return `<div class="stage ${{state}}">
+                <span style="color:${{color}};width:1.2rem">${{icon}}</span>
+                <span class="stage-label">${{label}}</span>
+            </div>`;
+        }}).join('');
+        const elapsed = startTime ? formatElapsed(Date.now() - startTime) : '0s';
+        document.getElementById('status').innerHTML = `
+            <div class="progress-box">
+                <div class="progress-header">Running — do not close this tab</div>
+                ${{stageHTML}}
+                <div style="color:#444;font-size:0.78rem;margin-top:0.75rem">
+                    Elapsed: ${{elapsed}} · polling every 5s
+                </div>
+            </div>`;
+    }}
+
+    async function runInference() {{
+        const btn = document.getElementById('runBtn');
+        btn.disabled = true;
+        startTime = Date.now();
+
+        const form = new FormData();
+        form.append('model_key', selectedModel);
+        form.append('task_key', selectedTask);
+
+        try {{
+            const resp = await fetch('/llm/run', {{method:'POST', body:form}});
+            const data = await resp.json();
+            if (data.job_id) {{
+                renderProgress('baseline');
+                pollLLM(data.job_id);
+            }} else {{
+                document.getElementById('status').innerHTML =
+                    '<div style="color:#ff4400">Error: ' + JSON.stringify(data) + '</div>';
+                btn.disabled = false;
+            }}
+        }} catch(e) {{
+            document.getElementById('status').innerHTML =
+                '<div style="color:#ff4400">Failed: ' + e + '</div>';
+            btn.disabled = false;
+        }}
+    }}
+
+    async function pollLLM(jobId) {{
+        try {{
+            const resp = await fetch('/llm/job/' + jobId);
+            const data = await resp.json();
+            if (data.status === 'done') {{
+                renderLLMResult(data.result);
+                document.getElementById('runBtn').disabled = false;
+            }} else if (data.status === 'error') {{
+                document.getElementById('status').innerHTML =
+                    '<div style="color:#ff4400">Error: ' + data.error + '</div>';
+                document.getElementById('runBtn').disabled = false;
+            }} else {{
+                renderProgress(data.stage || 'baseline');
+                setTimeout(() => pollLLM(jobId), 5000);
+            }}
+        }} catch(e) {{
+            setTimeout(() => pollLLM(jobId), 5000);
+        }}
+    }}
+
+    function renderLLMResult(r) {{
+        const e = r.energy;
+        const i = r.inference;
+        const t = r.thermals;
+        const elapsed = startTime ? formatElapsed(Date.now() - startTime) : '';
+        document.getElementById('status').innerHTML = `
+            <div style="color:#444;font-size:0.78rem;margin-bottom:1rem">
+                Total elapsed: ${{elapsed}}</div>
+            <div class="result-box">
+                <h2>Energy Report — ${{r.model_label}} · ${{r.task_label}}</h2>
+                <div class="section-title">Inference</div>
+                <div class="metric"><span>Model</span><span class="val">${{r.model_label}} (${{r.model_params}})</span></div>
+                <div class="metric"><span>Task</span><span class="val">${{r.task_label}}</span></div>
+                <div class="metric"><span>Output tokens</span><span class="val">${{i.output_tokens}}</span></div>
+                <div class="metric"><span>Tokens/sec</span><span class="val">${{i.tokens_per_sec}}</span></div>
+                <div class="metric"><span>Duration</span><span class="val">${{i.duration_s}}s</span></div>
+                <div class="section-title">Power (P110)</div>
+                <div class="metric"><span>Baseline</span><span class="val">${{e.w_base}} W</span></div>
+                <div class="metric"><span>Task mean</span><span class="val">${{e.w_task}} W</span></div>
+                <div class="metric"><span>Delta (ΔW)</span><span class="val">${{e.delta_w}} W</span></div>
+                <div class="metric"><span>Energy (ΔE)</span><span class="val">${{e.delta_e_wh}} Wh</span></div>
+                <div class="metric"><span>Energy/token</span>
+                    <span class="val">${{e.mwh_per_token}} mWh/token</span></div>
+                <div class="metric"><span>Polls</span><span class="val">${{e.poll_count}}</span></div>
+                <div class="section-title">Thermals</div>
+                <div class="metric"><span>CPU (start→end)</span>
+                    <span class="val">${{t.cpu_base}}→${{t.cpu_end}}°C</span></div>
+                <div class="metric"><span>GPU (start→end)</span>
+                    <span class="val">${{t.gpu_base}}→${{t.gpu_end}}°C</span></div>
+                <div style="margin-top:0.75rem">${{e.confidence.flag}} ${{e.confidence.label}}</div>
+                <div class="section-title">Response preview</div>
+                <div class="response-box">${{i.response}}</div>
+                <div class="scope-note">${{r.scope}}</div>
+            </div>`;
+    }}
+    </script>
+</body>
+</html>"""
+
+@app.post("/llm/run")
+async def llm_run(
+    background_tasks: BackgroundTasks,
+    model_key: str = Form(...),
+    task_key: str = Form(...)
+):
+    if LOCK_FILE.exists():
+        return JSONResponse({"error": "GoS1 is busy with another measurement"}, status_code=409)
+    if model_key not in MODELS:
+        return JSONResponse({"error": "Invalid model"}, status_code=400)
+    if task_key not in TASKS:
+        return JSONResponse({"error": "Invalid task"}, status_code=400)
+
+    job_id = str(uuid.uuid4())[:8]
+    background_tasks.add_task(run_llm_job, job_id, model_key, task_key)
+    return {"job_id": job_id}
+
+@app.get("/llm/job/{job_id}")
+async def llm_job_status(job_id: str):
+    return jobs.get(job_id, {"status": "not_found"})
 
 @app.get("/video/job/{job_id}")
 async def job_status(job_id: str):
