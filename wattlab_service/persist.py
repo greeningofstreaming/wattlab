@@ -48,7 +48,15 @@ def load_result(job_type: str, job_id: str) -> dict | None:
 def to_csv(job_type: str, data: dict) -> str:
     """Flatten a result dict to CSV string."""
     output = io.StringIO()
-    if job_type == "video":
+    if job_type == "image":
+        fieldnames = [
+            "job_id", "saved_at", "prompt", "full_prompt", "modifier",
+            "steps", "size", "model", "load_s", "gen_s", "total_s",
+            "w_base", "w_task", "delta_w", "delta_e_wh",
+            "poll_count", "confidence", "cpu_base", "cpu_end",
+        ]
+        rows = _image_rows(data)
+    elif job_type == "video":
         fieldnames = [
             "job_id", "saved_at", "mode", "preset", "duration_s",
             "w_base", "w_task", "delta_w", "delta_e_wh", "poll_count", "confidence",
@@ -63,7 +71,7 @@ def to_csv(job_type: str, data: dict) -> str:
             "poll_count", "confidence", "cpu_base", "gpu_base",
         ]
         rows = _llm_rows(data)
-    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
     writer.writeheader()
     writer.writerows(rows)
     return output.getvalue()
@@ -110,6 +118,30 @@ def _summarise(job_type: str, data: dict) -> dict:
         summary["tokens_per_sec"] = i.get("tokens_per_sec")
         summary["confidence"] = e.get("confidence", {}).get("flag")
     return summary
+
+
+def _image_rows(data: dict) -> list:
+    e = data.get("energy", {})
+    gen = data.get("generation", {})
+    t = data.get("thermals", {})
+    return [{
+        "job_id": data.get("job_id"),
+        "saved_at": data.get("saved_at"),
+        "prompt": data.get("prompt"),
+        "full_prompt": data.get("full_prompt"),
+        "modifier": data.get("modifier"),
+        "steps": gen.get("steps"),
+        "size": gen.get("size"),
+        "model": gen.get("model"),
+        "load_s": gen.get("load_s"),
+        "gen_s": gen.get("gen_s"),
+        "total_s": gen.get("total_s"),
+        "w_base": e.get("w_base"), "w_task": e.get("w_task"),
+        "delta_w": e.get("delta_w"), "delta_e_wh": e.get("delta_e_wh"),
+        "poll_count": e.get("poll_count"),
+        "confidence": e.get("confidence", {}).get("label"),
+        "cpu_base": t.get("cpu_base"), "cpu_end": t.get("cpu_end"),
+    }]
 
 
 def _video_rows(data: dict) -> list:

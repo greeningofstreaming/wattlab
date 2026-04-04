@@ -3,7 +3,7 @@ import io
 import json
 import uuid
 from pathlib import Path
-from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form
+from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from dotenv import dotenv_values
 from tapo import ApiClient
@@ -17,6 +17,48 @@ import settings as cfg
 config = dotenv_values("/home/gos/wattlab/.env")
 app = FastAPI()
 jobs = {}
+
+# --- Queue ---
+pending_queue = []          # list of {"job_id", "type", "label", "coro_fn"}
+queue_event = asyncio.Event()
+current_job_id = None       # job currently executing
+
+
+def enqueue(job_id: str, job_type: str, label: str, coro_fn) -> int:
+    """Add a job to the FIFO queue. Returns 1-based queue position."""
+    position = len(pending_queue) + 1
+    jobs[job_id] = {"stage": "queued", "queue_position": position, "result": None, "error": None}
+    pending_queue.append({"job_id": job_id, "type": job_type, "label": label, "coro_fn": coro_fn})
+    queue_event.set()
+    return position
+
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(queue_worker())
+
+
+async def queue_worker():
+    global current_job_id
+    while True:
+        await queue_event.wait()
+        queue_event.clear()
+        while pending_queue:
+            entry = pending_queue.pop(0)
+            job_id = entry["job_id"]
+            current_job_id = job_id
+            # Update queue positions for remaining jobs
+            for i, e in enumerate(pending_queue):
+                if e["job_id"] in jobs:
+                    jobs[e["job_id"]]["queue_position"] = i + 1
+            try:
+                await entry["coro_fn"]()
+            except Exception as e:
+                jobs[job_id] = {**jobs.get(job_id, {}),
+                                "stage": "error", "error": str(e)}
+                LOCK_FILE.unlink(missing_ok=True)
+            finally:
+                current_job_id = None
 
 GOS_LOGO_URL = "https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png"
 _LOGO = (
@@ -73,6 +115,7 @@ async def index():
         <a href="/llm">▶ LLM inference test</a>
         <a href="/image">▶ Image generation test</a>
         <a href="/demo">◆ Demo mode</a>
+        <a href="/queue-status">⏱ Queue</a>
         <a href="/settings">⚙ Settings</a>
     </div>
 </body>
@@ -87,11 +130,12 @@ async def power_json():
 
 @app.get("/video", response_class=HTMLResponse)
 async def video_page():
-    busy = LOCK_FILE.exists()
-    busy_banner = """<div style="background:#ff4400;color:#fff;padding:1rem;
-        text-align:center;margin-bottom:1rem">
-        ⚠ GoS1 is currently running a measurement. Please wait.</div>""" \
-        if busy else ""
+    queue_depth = len(pending_queue) + (1 if current_job_id else 0)
+    busy_banner = (f'<div style="background:#333;color:#ffaa00;padding:0.75rem 1rem;'
+                   f'margin-bottom:1rem;font-size:0.85rem">'
+                   f'⏱ {queue_depth} job{"s" if queue_depth != 1 else ""} in queue — '
+                   f'yours will be added and run automatically.</div>') \
+        if queue_depth > 0 else ""
 
     return f"""<!DOCTYPE html>
 <html>
@@ -397,6 +441,9 @@ async def video_page():
                 document.getElementById('status').innerHTML =
                     '<div style="color:#ff4400">Error: ' + data.error + '</div>';
                 document.getElementById('runBtn').disabled = false;
+            }} else if (data.stage === 'queued') {{
+                renderQueued(data.queue_position);
+                setTimeout(() => pollJob(jobId, mode), 3000);
             }} else {{
                 renderProgress(jobId, mode, data.stage || "starting");
                 setTimeout(() => pollJob(jobId, mode), 5000);
@@ -404,6 +451,14 @@ async def video_page():
         }} catch(e) {{
             setTimeout(() => pollJob(jobId, mode), 5000);
         }}
+    }}
+
+    function renderQueued(position) {{
+        document.getElementById('status').innerHTML =
+            '<div style="border:1px solid #333;padding:1.5rem">' +
+            '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">⏱ Queued — position ' + position + '</div>' +
+            '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>' +
+            '</div>';
     }}
 
     function metricRow(label, val, unit='') {{
@@ -577,34 +632,32 @@ async def run_job(job_id: str, input_path: Path, preset: str, delete_after: bool
 
 @app.post("/video/use-source")
 async def use_preloaded_source(
-    background_tasks: BackgroundTasks,
     source_key: str = Form(...),
     preset: str = Form("both")
 ):
     if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "av1_cpu"):
         return JSONResponse({"error": "Invalid preset"}, status_code=400)
-    if LOCK_FILE.exists():
-        return JSONResponse({"error": "GoS1 is busy with another measurement"}, status_code=409)
 
     source = PRELOADED.get(source_key)
     if not source or not source["path"].exists():
         return JSONResponse({"error": f"Source '{source_key}' not found"}, status_code=404)
 
     job_id = str(uuid.uuid4())[:8]
-    background_tasks.add_task(run_job, job_id, source["path"], preset, False)
-    return {"job_id": job_id}
+    label = f"Video — {preset} · {source['label']}"
+
+    async def coro():
+        await run_job(job_id, source["path"], preset, False)
+
+    position = enqueue(job_id, "video", label, coro)
+    return {"job_id": job_id, "queue_position": position}
 
 @app.post("/video/upload")
 async def upload_video(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     preset: str = Form("both")
 ):
     if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "av1_cpu"):
         return JSONResponse({"error": "Invalid preset"}, status_code=400)
-    if LOCK_FILE.exists():
-        return JSONResponse(
-            {"error": "GoS1 is busy with another measurement"}, status_code=409)
 
     allowed = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".ts"}
     suffix = Path(file.filename).suffix.lower()
@@ -618,9 +671,13 @@ async def upload_video(
     job_id = str(uuid.uuid4())[:8]
     input_path = UPLOAD_DIR / f"{job_id}_in{suffix}"
     input_path.write_bytes(contents)
+    label = f"Video — {preset} · {file.filename}"
 
-    background_tasks.add_task(run_job, job_id, input_path, preset)
-    return {"job_id": job_id}
+    async def coro():
+        await run_job(job_id, input_path, preset, True)
+
+    position = enqueue(job_id, "video", label, coro)
+    return {"job_id": job_id, "queue_position": position}
 
 
 @app.get("/video/sources")
@@ -907,6 +964,13 @@ async def llm_page():
                 document.getElementById('status').innerHTML =
                     '<div style="color:#ff4400">Error: ' + data.error + '</div>';
                 document.getElementById('runBtn').disabled = false;
+            }} else if (data.stage === 'queued') {{
+                document.getElementById('status').innerHTML =
+                    '<div style="border:1px solid #333;padding:1.5rem">' +
+                    '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">⏱ Queued — position ' + data.queue_position + '</div>' +
+                    '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>' +
+                    '</div>';
+                streamTimer = setTimeout(() => pollLLM(jobId), 3000);
             }} else {{
                 const stage = data.stage || 'baseline';
                 renderProgress(stage);
@@ -1077,15 +1141,12 @@ async def llm_page():
 
 @app.post("/llm/run")
 async def llm_run(
-    background_tasks: BackgroundTasks,
     model_key: str = Form(...),
     task_key: str = Form(...),
     repeats: int = Form(1),
     warm: bool = Form(False),
     prompt: str = Form(None),
 ):
-    if LOCK_FILE.exists():
-        return JSONResponse({"error": "GoS1 is busy with another measurement"}, status_code=409)
     if model_key not in MODELS:
         return JSONResponse({"error": "Invalid model"}, status_code=400)
     if task_key not in TASKS:
@@ -1095,8 +1156,13 @@ async def llm_run(
 
     effective_prompt = prompt.strip() if prompt and prompt.strip() else None
     job_id = str(uuid.uuid4())[:8]
-    background_tasks.add_task(run_llm_job, job_id, model_key, task_key, repeats, warm, effective_prompt)
-    return {"job_id": job_id}
+    label = f"LLM — {MODELS[model_key]['label']} · {TASKS[task_key]['label']}"
+
+    async def coro():
+        await run_llm_job(job_id, model_key, task_key, repeats, warm, effective_prompt)
+
+    position = enqueue(job_id, "llm", label, coro)
+    return {"job_id": job_id, "queue_position": position}
 
 @app.get("/llm/job/{job_id}")
 async def llm_job_status(job_id: str):
@@ -1110,6 +1176,22 @@ async def job_status(job_id: str):
 async def image_job_status(job_id: str):
     return jobs.get(job_id, {"status": "not_found"})
 
+@app.get("/queue")
+async def queue_status_endpoint():
+    running = None
+    if current_job_id and current_job_id in jobs:
+        j = jobs[current_job_id]
+        running = {"job_id": current_job_id, "stage": j.get("stage")}
+    pending_info = [
+        {"job_id": e["job_id"], "type": e["type"], "label": e["label"], "position": i + 1}
+        for i, e in enumerate(pending_queue)
+    ]
+    return {
+        "depth": len(pending_queue) + (1 if current_job_id else 0),
+        "running": running,
+        "pending": pending_info,
+    }
+
 
 # --- Results: list, JSON download, CSV download ---
 
@@ -1121,7 +1203,7 @@ async def results_list(job_type: str):
 
 @app.get("/results/{job_type}/{job_id}/download.json")
 async def results_download_json(job_type: str, job_id: str):
-    if job_type not in ("video", "llm"):
+    if job_type not in ("video", "llm", "image"):
         return JSONResponse({"error": "Invalid type"}, status_code=400)
     data = load_result(job_type, job_id)
     if not data:
@@ -1135,7 +1217,7 @@ async def results_download_json(job_type: str, job_id: str):
 
 @app.get("/results/{job_type}/{job_id}/download.csv")
 async def results_download_csv(job_type: str, job_id: str):
-    if job_type not in ("video", "llm"):
+    if job_type not in ("video", "llm", "image"):
         return JSONResponse({"error": "Invalid type"}, status_code=400)
     data = load_result(job_type, job_id)
     if not data:
@@ -1408,6 +1490,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     <span class="dot" id="dot-1"></span>
     <span class="dot" id="dot-2"></span>
     <span class="dot" id="dot-3"></span>
+    <span class="dot" id="dot-4"></span>
     <span class="label active" id="nav-label">Welcome</span>
   </div>
 </div>
@@ -1533,8 +1616,24 @@ _DEMO_HTML = f"""<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Step 3: Summary -->
+<!-- Step 3: Image generation -->
 <div class="step" id="step-3">
+  <h1>Image generation</h1>
+  <p class="step-intro">How much energy does one AI image cost? WattLab measures the full device draw — not an estimate.</p>
+  <div class="method-box">
+    <strong>Protocol:</strong> Baseline (10s idle) → CPU diffusion (SD-Turbo, 8 steps) → P110 measurement.
+    A random colour modifier is appended to prove the image is generated live, not replayed.
+  </div>
+
+  <div id="image-btns" class="btn-row">
+    <button class="btn btn-primary" onclick="runDemoImage()">Generate &amp; measure</button>
+    <button class="btn btn-secondary" onclick="showPrevImage()">See previous run</button>
+  </div>
+  <div id="image-status"></div>
+</div>
+
+<!-- Step 4: Summary -->
+<div class="step" id="step-4">
   <h1>Findings</h1>
   <p style="color:#555;font-size:0.85rem;margin-bottom:1.5rem">
     Greening of Streaming · WattLab · GoS1</p>
@@ -1545,7 +1644,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <hr class="divider">
   <div class="btn-row">
-    <button class="btn btn-secondary" onclick="goStep(1)">← Run again</button>
+    <button class="btn btn-secondary" onclick="goStep(1)">← Start over</button>
     <a href="https://greeningofstreaming.org" target="_blank"
        class="btn btn-secondary" style="text-decoration:none;display:inline-block;line-height:1">
       greeningofstreaming.org ↗</a>
@@ -1562,14 +1661,16 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 let currentStep = 0;
 let videoResult = null;
 let llmResult = null;
-const stepLabels = ['Welcome', 'Video', 'LLM', 'Findings'];
+let imageResult = null;
+const stepLabels = ['Welcome', 'Video', 'LLM', 'Image', 'Findings'];
 let streamTimer = null;
+let imageTimer = null;
 
 // ─── Step navigation ─────────────────────────────────────────────────────────
 function goStep(n) {{
   document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
   document.getElementById('step-' + n).classList.add('active');
-  for (let i = 0; i < 4; i++) {{
+  for (let i = 0; i < 5; i++) {{
     const dot = document.getElementById('dot-' + i);
     dot.className = 'dot' + (i < n ? ' done' : i === n ? ' active' : '');
   }}
@@ -1578,7 +1679,7 @@ function goStep(n) {{
   lbl.className = 'label active';
   currentStep = n;
   window.scrollTo(0, 0);
-  if (n === 3) buildSummary();
+  if (n === 4) buildSummary();
 }}
 
 // ─── Live power ───────────────────────────────────────────────────────────────
@@ -1872,7 +1973,7 @@ function renderLLMResult(r, savedAt, isPrev) {{
   document.getElementById('llm-btns').style.display = 'none';
   document.getElementById('llm-status').innerHTML +=
     '<div class="btn-row" style="margin-top:1.5rem">' +
-    '<button class="btn btn-primary" onclick="goStep(3)">See findings →</button>' +
+    '<button class="btn btn-primary" onclick="goStep(3)">Next: Image generation →</button>' +
     '<button class="btn btn-secondary" onclick="resetLLMStep()">Run again</button></div>';
 }}
 
@@ -1885,6 +1986,114 @@ function resetLLMStep() {{
   document.getElementById('llm-btns').style.display = 'flex';
   document.getElementById('llm-status').innerHTML = '';
   checkPrevResults();
+}}
+function resetImageStep() {{
+  document.getElementById('image-btns').style.display = 'flex';
+  document.getElementById('image-status').innerHTML = '';
+}}
+
+// ─── Image ────────────────────────────────────────────────────────────────────
+async function runDemoImage() {{
+  document.getElementById('image-btns').style.display = 'none';
+  document.getElementById('image-status').innerHTML =
+    '<p class="progress-note">Submitting…</p>';
+  const resp = await fetch('/image/start', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+    body: 'prompt=' + encodeURIComponent('a lone wind turbine in an open landscape'),
+  }});
+  const data = await resp.json();
+  if (data.error) {{
+    document.getElementById('image-btns').style.display = 'flex';
+    document.getElementById('image-status').innerHTML =
+      '<p class="progress-note" style="color:#ff4400">' + data.error + '</p>';
+    return;
+  }}
+  pollDemoImage(data.job_id);
+}}
+
+async function pollDemoImage(jobId) {{
+  try {{
+    const r = await fetch('/image/job/' + jobId);
+    const j = await r.json();
+    if (j.stage === 'queued') {{
+      document.getElementById('image-status').innerHTML =
+        '<p class="progress-note">⏱ Queued — position ' + j.queue_position +
+        '. Will start automatically.</p>';
+      imageTimer = setTimeout(() => pollDemoImage(jobId), 3000);
+      return;
+    }}
+    if (j.stage === 'done' && j.result) {{
+      imageResult = j.result;
+      renderDemoImageResult(j.result);
+      return;
+    }}
+    if (j.error) {{
+      document.getElementById('image-status').innerHTML =
+        '<p class="progress-note" style="color:#ff4400">Error: ' + j.error + '</p>';
+      document.getElementById('image-btns').style.display = 'flex';
+      return;
+    }}
+    const stageLabel = j.stage === 'generating' ? 'Generating image…' :
+                       j.stage === 'baseline' ? 'Measuring baseline…' : j.stage;
+    document.getElementById('image-status').innerHTML =
+      '<p class="progress-note">⚡ ' + stageLabel + '</p>';
+    imageTimer = setTimeout(() => pollDemoImage(jobId), 2000);
+  }} catch(e) {{
+    imageTimer = setTimeout(() => pollDemoImage(jobId), 3000);
+  }}
+}}
+
+async function showPrevImage() {{
+  document.getElementById('image-btns').style.display = 'none';
+  document.getElementById('image-status').innerHTML =
+    '<p class="progress-note">Loading last result…</p>';
+  try {{
+    const resp = await fetch('/results/image/list');
+    const list = await resp.json();
+    if (!list || list.length === 0) {{
+      document.getElementById('image-status').innerHTML =
+        '<p class="progress-note" style="color:#555">No previous runs found.</p>';
+      document.getElementById('image-btns').style.display = 'flex';
+      return;
+    }}
+    const meta = list[0];
+    const r2 = await fetch('/results/image/' + meta.job_id + '/download.json');
+    const full = await r2.json();
+    imageResult = full;
+    renderDemoImageResult(full);
+  }} catch(e) {{
+    document.getElementById('image-btns').style.display = 'flex';
+    document.getElementById('image-status').innerHTML =
+      '<p class="progress-note" style="color:#ff4400">Error: ' + e + '</p>';
+  }}
+}}
+
+function renderDemoImageResult(r) {{
+  const e = r.energy;
+  const gen = r.generation;
+  const imgHtml = gen && gen.b64_png
+    ? '<img src="data:image/png;base64,' + gen.b64_png +
+      '" style="max-width:100%;border:1px solid #222;display:block;margin-top:1rem">' +
+      '<div style="color:#444;font-size:0.75rem;margin-top:0.5rem;font-style:italic">"' +
+      r.full_prompt + '"</div>'
+    : '';
+  document.getElementById('image-status').innerHTML =
+    '<div class="result-card">' +
+    '<div class="result-kpis">' +
+    '<div class="kpi"><div class="kval">' + fmt(e.delta_e_wh,4) + ' Wh</div>' +
+    '<div class="klbl">energy / image</div></div>' +
+    '<div class="kpi"><div class="kval">' + fmt(gen && gen.total_s,1) + 's</div>' +
+    '<div class="klbl">generation time</div></div>' +
+    '<div class="kpi"><div class="kval">' + fmt(e.delta_w,1) + ' W</div>' +
+    '<div class="klbl">delta above idle</div></div>' +
+    '</div>' +
+    '<div class="conf">' + e.confidence.flag + ' ' + e.confidence.label + '</div>' +
+    imgHtml +
+    '</div>' +
+    '<div class="btn-row" style="margin-top:1.5rem">' +
+    '<button class="btn btn-primary" onclick="goStep(4)">See findings →</button>' +
+    '<button class="btn btn-secondary" onclick="resetImageStep()">Run again</button></div>';
 }}
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
@@ -1916,6 +2125,15 @@ function buildSummary() {{
     rows += `<tr><td>LLM</td><td style="color:#333">No result this session</td></tr>`;
   }}
 
+  if (imageResult) {{
+    const e = imageResult.energy;
+    rows += `<tr><td>Image · Energy / image</td><td>${{fmt(e.delta_e_wh,4)}} Wh</td></tr>`;
+    rows += `<tr><td>Image · Generation time</td><td>${{fmt(imageResult.generation && imageResult.generation.total_s,1)}}s</td></tr>`;
+    rows += `<tr><td>Image · Confidence</td><td>${{e.confidence.flag}} ${{e.confidence.label}}</td></tr>`;
+  }} else {{
+    rows += `<tr><td>Image</td><td style="color:#333">No result this session</td></tr>`;
+  }}
+
   el.innerHTML = `
     <table class="summary-table"><tbody>${{rows}}</tbody></table>
     <p style="color:#555;font-size:0.82rem;line-height:1.7;margin-top:1.5rem;max-width:560px">
@@ -1930,11 +2148,12 @@ function buildSummary() {{
 
 @app.get("/image", response_class=HTMLResponse)
 async def image_page():
-    busy = LOCK_FILE.exists()
-    busy_banner = """<div style="background:#ff4400;color:#fff;padding:1rem;
-        text-align:center;margin-bottom:1rem">
-        ⚠ GoS1 is currently running a measurement. Please wait.</div>""" \
-        if busy else ""
+    queue_depth = len(pending_queue) + (1 if current_job_id else 0)
+    busy_banner = (f'<div style="background:#333;color:#ffaa00;padding:0.75rem 1rem;'
+                   f'margin-bottom:1rem;font-size:0.85rem">'
+                   f'⏱ {queue_depth} job{"s" if queue_depth != 1 else ""} in queue — '
+                   f'yours will be added and run automatically.</div>') \
+        if queue_depth > 0 else ""
 
     prev_runs = list_results("image", limit=5)
     prev_html = ""
@@ -1955,6 +2174,10 @@ async def image_page():
                 &nbsp;·&nbsp; {r.get("delta_t_s","?")}s
               </span>
               <div class="prev-prompt" style="color:#555;font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
+              <div style="margin-top:0.3rem">
+                <a href="/results/image/{r['job_id']}/download.json" download style="color:#333;font-size:0.72rem;text-decoration:none;margin-right:0.75rem">↓ JSON</a>
+                <a href="/results/image/{r['job_id']}/download.csv" download style="color:#333;font-size:0.72rem;text-decoration:none">↓ CSV</a>
+              </div>
             </div>"""
         prev_html += "</div>"
 
@@ -2070,9 +2293,18 @@ async function pollJob(jobId) {{
   const r = await fetch('/image/job/' + jobId);
   const j = await r.json();
 
+  if (j.stage === 'queued') {{
+    document.getElementById('status').innerHTML =
+      '<div style="border:1px solid #333;padding:1.5rem">' +
+      '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">⏱ Queued — position ' + j.queue_position + '</div>' +
+      '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>' +
+      '</div>';
+    return;
+  }}
+
   const powerR = await fetch('/power');
-  const powerJ = await powerR.json();
-  renderProgress(j.stage, j.result, powerJ.watts);
+  const powerJ = await powerR.json().catch(() => ({{}}));
+  renderProgress(j.stage, j.result, powerJ.watts ?? null);
 
   if (j.stage === 'done' && j.result) {{
     clearInterval(pollTimer);
@@ -2158,14 +2390,11 @@ function renderResult(r) {{
 
 
 @app.post("/image/start")
-async def image_start(background_tasks: BackgroundTasks,
-                      prompt: str = Form(...)):
-    if LOCK_FILE.exists():
-        return JSONResponse({"error": "Measurement already running"}, status_code=409)
+async def image_start(prompt: str = Form(...)):
     job_id = uuid.uuid4().hex[:8]
-    jobs[job_id] = {"stage": "starting", "result": None, "error": None}
+    label = f"Image — {prompt[:40]}"
 
-    async def run():
+    async def coro():
         try:
             result = await run_image_measurement(prompt, job_id, jobs)
             save_result("image", job_id, result)
@@ -2174,8 +2403,74 @@ async def image_start(background_tasks: BackgroundTasks,
             jobs[job_id]["error"] = str(e)
             LOCK_FILE.unlink(missing_ok=True)
 
-    background_tasks.add_task(run)
-    return {"job_id": job_id}
+    position = enqueue(job_id, "image", label, coro)
+    return {"job_id": job_id, "queue_position": position}
+
+
+@app.get("/queue-status", response_class=HTMLResponse)
+async def queue_page():
+    return """<!DOCTYPE html>
+<html>
+<head>
+    <title>WattLab — Queue</title>
+    <meta http-equiv="refresh" content="4">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: monospace; background: #0a0a0a; color: #e0e0e0;
+               max-width: 620px; margin: 0 auto; padding: 2rem; }
+        h1 { color: #00ff99; font-size: 1.3rem; margin-bottom: 0.25rem; }
+        .sub { color: #444; font-size: 0.78rem; margin-bottom: 2rem; }
+        .empty { color: #333; font-size: 0.85rem; padding: 1.5rem 0; }
+        .card { border: 1px solid #222; padding: 1rem 1.25rem; margin-bottom: 0.75rem; }
+        .card.running { border-color: #00ff9966; }
+        .card.waiting { border-color: #333; }
+        .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem;
+                 margin-bottom: 0.5rem; }
+        .badge.run { background: #00ff9922; color: #00ff99; }
+        .badge.wait { background: #22222299; color: #555; }
+        .label { font-size: 0.9rem; color: #ccc; margin-bottom: 0.25rem; }
+        .stage { font-size: 0.75rem; color: #555; }
+        .back { color: #444; font-size: 0.78rem; text-decoration: none;
+                display: block; margin-bottom: 1.5rem; }
+        .back:hover { color: #00ff99; }
+        .depth { font-size: 2.5rem; color: #00ff99; font-weight: bold; }
+        .depth-lbl { color: #444; font-size: 0.75rem; margin-bottom: 2rem; }
+    </style>
+</head>
+<body>
+    <a href="/" class="back">← dashboard</a>
+    <h1>Queue</h1>
+    <div class="sub">Auto-refreshes every 4s</div>
+    <div id="content"><p class="empty">Loading…</p></div>
+<script>
+async function load() {
+    const r = await fetch('/queue');
+    const q = await r.json();
+    const el = document.getElementById('content');
+    if (q.depth === 0) {
+        el.innerHTML = '<div class="depth">0</div><div class="depth-lbl">jobs in queue — GoS1 is idle</div>';
+        return;
+    }
+    let html = '<div class="depth">' + q.depth + '</div>' +
+               '<div class="depth-lbl">job' + (q.depth !== 1 ? 's' : '') + ' in queue</div>';
+    if (q.running) {
+        html += '<div class="card running">' +
+                '<span class="badge run">▶ RUNNING</span>' +
+                '<div class="label">' + (q.running.label || q.running.job_id) + '</div>' +
+                '<div class="stage">stage: ' + (q.running.stage || '…') + '</div></div>';
+    }
+    (q.pending || []).forEach((j, i) => {
+        html += '<div class="card waiting">' +
+                '<span class="badge wait"># ' + j.position + '</span>' +
+                '<div class="label">' + j.label + '</div>' +
+                '<div class="stage">waiting</div></div>';
+    });
+    el.innerHTML = html;
+}
+load();
+</script>
+</body>
+</html>"""
 
 
 @app.get("/demo", response_class=HTMLResponse)

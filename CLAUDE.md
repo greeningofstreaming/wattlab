@@ -72,9 +72,12 @@ wattlab/
 │   ├── video/
 │   └── llm/
 └── wattlab_service/
-    ├── main.py                   # FastAPI routes + all HTML UI
+    ├── main.py                   # FastAPI routes + all HTML UI + queue worker
     ├── video.py                  # P110 + ffmpeg + thermals + focus mode
     ├── llm.py                    # Ollama inference + P110 measurement
+    ├── image_gen.py              # SD-Turbo CPU diffusion + P110 measurement
+    ├── persist.py                # Flat-file result storage + CSV/JSON export
+    ├── settings.py               # Lab config (8 params, settings.json)
     └── sources.py                # Pre-loaded test content registry
 ```
 
@@ -120,22 +123,22 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 
 ## Prioritised Roadmap
 
-### Phase 1 — Research Integrity (next session)
-- [ ] JSON result persistence (flat files, not SQLite)
-- [ ] Result export (CSV + JSON download)
-- [ ] Previous results browser (last 10 runs per test type)
+### Phase 1 — Research Integrity ✅
+- [x] JSON result persistence (flat files, not SQLite)
+- [x] Result export (CSV + JSON download) — video, llm, image
+- [x] Previous results browser (last 10 runs per test type)
 
-### Phase 2 — Measurement Quality (session 2)
-- [ ] LLM batched mode (load once, rest, run N times)
-- [ ] LLM warm vs cold toggle
-- [ ] LLM editable prompts with reset-to-default
-- [ ] LLM streaming output display (word-by-word)
-- [ ] Video H.265 + AV1 presets
+### Phase 2 — Measurement Quality ✅
+- [x] LLM batched mode (load once, rest, run N times)
+- [x] LLM warm vs cold toggle
+- [x] LLM editable prompts with reset-to-default
+- [x] LLM streaming output display (word-by-word)
+- [x] Video H.265 + AV1 presets
 
-### Phase 3 — Settings & Lab Config (session 3)
-- [ ] /settings page (lab only, blocked on public URL)
-- [ ] Configurable: baseline duration, cooldown, repeats, rest time
-- [ ] Settings stored in settings.json
+### Phase 3 — Settings & Lab Config ✅
+- [x] /settings page (lab only, blocked on public URL)
+- [x] Configurable: baseline duration, cooldown, repeats, rest time
+- [x] Settings stored in settings.json
 
 ### Phase 4 — Demo Mode (session 4) ✅
 - [x] /demo guided journey

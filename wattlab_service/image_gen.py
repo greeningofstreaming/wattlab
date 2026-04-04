@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from dotenv import dotenv_values
 from tapo import ApiClient
+from video import focus_mode_enter, focus_mode_exit
 import settings as cfg
 
 config = dotenv_values("/home/gos/wattlab/.env")
@@ -125,6 +126,7 @@ async def run_image_measurement(prompt: str, job_id: str,
         jobs[job_id]["stage"] = "baseline"
         jobs[job_id]["full_prompt"] = full_prompt
 
+    stopped = focus_mode_enter()
     sensors_base = read_sensors()
     w_base = await measure_baseline(polls=s["baseline_polls"])
 
@@ -144,6 +146,8 @@ async def run_image_measurement(prompt: str, job_id: str,
     readings = await poll_task
 
     LOCK_FILE.unlink(missing_ok=True)
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, focus_mode_exit, stopped)
 
     if jobs is not None:
         jobs[job_id]["stage"] = "done"

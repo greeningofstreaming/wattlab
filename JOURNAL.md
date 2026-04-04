@@ -90,11 +90,16 @@ GPU image generation deferred: z-image-turbo needs 11.9 GiB VRAM, card has 12 Gi
 - Image page used `r["date"]` (doesn't exist) and `r["data"]` (doesn't exist) from `list_results` summaries — fixed to use `r["saved_at"]` and direct summary fields; added `"image"` branch to `persist._summarise`
 - Image JS polled `/job/{id}` — endpoint doesn't exist; correct path is `/image/job/{id}` — added endpoint and fixed JS
 
+### Also built this session
+- **FIFO queue system:** central `pending_queue` + `queue_event` + `queue_worker` coroutine (startup task). All three test endpoints enqueue instead of returning 409. Job status includes `queue_position`. Each test page shows "⏱ Queued — position N" while waiting, auto-transitions when slot opens. `/queue-status` HTML page (auto-refresh 4s) shows running job + queue depth. `/queue` JSON endpoint for programmatic access.
+- **Fixes to prior gaps:** image_gen.py now calls `focus_mode_enter/exit`; image results export (JSON + CSV) enabled; image step added to `/demo` as step 3 (before summary); CLAUDE.md roadmap checkboxes corrected; `queue-status` link added to home nav.
+
 ### Deferred (carried forward)
 - GPU image generation (needs VRAM headroom or larger card)
 - LLM result text display in result card (last batch iteration)
 - All-tasks batch launch (T1+T2+T3 in one click)
 - Prompt textarea visibility improvement
+- UI polish / visual design pass (flagged for next session)
 
 ---
 
