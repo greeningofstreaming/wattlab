@@ -80,6 +80,46 @@ _LOGO = (
 _BACK = '<a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Dashboard</a>'
 _FOOTER = f'<footer style="margin-top:3rem;padding-top:1rem;border-top:1px solid #111">{_LOGO}</footer>'
 
+# Confidence flag popover — inject into any page that shows .conf-badge elements.
+# Plain string (not f-string) so JS curly braces need no escaping.
+_CONF_HELP_WIDGET = (
+    '<div id="conf-pop" style="display:none;position:fixed;z-index:9999;background:#111;'
+    'border:1px solid #222;padding:1rem 1.25rem;max-width:300px;font-size:0.8rem;'
+    'line-height:1.7;box-shadow:0 4px 24px #000a">'
+    '<div style="font-family:monospace;color:#333;font-size:0.65rem;text-transform:uppercase;'
+    'letter-spacing:0.06em;margin-bottom:0.75rem">Confidence flag</div>'
+    '<div style="margin-bottom:0.5rem">'
+    '<span style="font-family:monospace">🟢 Repeatable</span>'
+    '<span style="color:#555;display:block;font-size:0.75rem;padding-left:1.4rem">'
+    'ΔW &gt; 5W and ≥ 10 polls. Reliable enough to cite.</span></div>'
+    '<div style="margin-bottom:0.5rem">'
+    '<span style="font-family:monospace">🟡 Early insight</span>'
+    '<span style="color:#555;display:block;font-size:0.75rem;padding-left:1.4rem">'
+    'ΔW ≥ 2W or ≥ 5 polls. Directional, needs more runs.</span></div>'
+    '<div>'
+    '<span style="font-family:monospace">🔴 Need more data</span>'
+    '<span style="color:#555;display:block;font-size:0.75rem;padding-left:1.4rem">'
+    'ΔW &lt; 2W. Near P110 noise floor. Don\'t cite yet.</span></div>'
+    '<div style="color:#2a2a2a;font-size:0.7rem;margin-top:0.75rem;font-family:monospace">'
+    'ΔW = mean task power \u2212 idle baseline \u00b7 1s P110 polls</div>'
+    '</div>'
+    '<script>(function(){'
+    'var s=document.createElement("style");'
+    's.textContent=".conf-badge{cursor:pointer}";'
+    'document.head.appendChild(s);'
+    'var pop=document.getElementById("conf-pop");'
+    'document.addEventListener("click",function(e){'
+    'var b=e.target.closest(".conf-badge");'
+    'if(b){e.stopPropagation();'
+    'var r=b.getBoundingClientRect();'
+    'pop.style.left=Math.min(r.left,window.innerWidth-320)+"px";'
+    'pop.style.top=(r.bottom+6+window.scrollY)+"px";'
+    'pop.style.display=pop.style.display==="none"?"block":"none";'
+    '}else if(!pop.contains(e.target)){pop.style.display="none";}'
+    '});'
+    '})();</script>'
+)
+
 # --- P110 ---
 
 async def get_power_watts() -> float:
@@ -630,6 +670,7 @@ async def video_page():
 
     loadPrevRuns();
     </script>
+    {_CONF_HELP_WIDGET}
     {_FOOTER}
 </body>
 </html>"""
@@ -1428,6 +1469,7 @@ async def llm_page():
 
     loadPrevRuns();
     </script>
+    {_CONF_HELP_WIDGET}
     {_FOOTER}
 </body>
 </html>"""
@@ -1831,6 +1873,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     <span class="dot" id="dot-2"></span>
     <span class="dot" id="dot-3"></span>
     <span class="dot" id="dot-4"></span>
+    <span class="dot" id="dot-5"></span>
     <span class="label active" id="nav-label">Welcome</span>
   </div>
 </div>
@@ -2018,14 +2061,78 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div id="next-3" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
     <div class="btn-row">
-      <button class="btn btn-primary" onclick="goStep(4)">See findings →</button>
+      <button class="btn btn-primary" onclick="goStep(4)">Next: How we flag confidence →</button>
       <button class="btn btn-secondary" onclick="resetImageStep()">Run again</button>
     </div>
   </div>
 </div>
 
-<!-- Step 4: Summary -->
+<!-- Step 4: Confidence -->
 <div class="step" id="step-4">
+  <h1>How We Flag Confidence</h1>
+
+  <div class="band">
+    <div class="band-label">The problem</div>
+    <p style="color:#aaa;line-height:1.8;max-width:560px">
+      Not every measurement we take is equally trustworthy.
+      The Tapo P110 has a practical noise floor of around 1W at steady state.
+      A task that adds 1.5W above baseline might be real signal — or it might
+      be measurement noise from the plug itself.
+    </p>
+  </div>
+
+  <div class="band">
+    <div class="band-label">The system</div>
+    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:1rem">
+      Every result carries a traffic light based on two measurements:
+      the power delta above idle (ΔW) and the number of 1-second polls
+      taken during the task.
+    </p>
+    <div style="display:flex;flex-direction:column;gap:0.75rem;max-width:480px">
+      <div style="border-left:2px solid #1a3a1a;padding:0.6rem 1rem">
+        <div style="font-family:monospace;font-size:0.9rem">🟢 Repeatable</div>
+        <div style="color:#555;font-size:0.82rem;margin-top:0.25rem">
+          ΔW > 5W and ≥ 10 polls. Well above noise floor. Reliable enough to cite.</div>
+      </div>
+      <div style="border-left:2px solid #3a3a00;padding:0.6rem 1rem">
+        <div style="font-family:monospace;font-size:0.9rem">🟡 Early insight</div>
+        <div style="color:#555;font-size:0.82rem;margin-top:0.25rem">
+          ΔW ≥ 2W or ≥ 5 polls. Directional and consistent with expectation,
+          but needs more runs before we'd stake a public claim on it.</div>
+      </div>
+      <div style="border-left:2px solid #2a0000;padding:0.6rem 1rem">
+        <div style="font-family:monospace;font-size:0.9rem">🔴 Need more data</div>
+        <div style="color:#555;font-size:0.82rem;margin-top:0.25rem">
+          ΔW &lt; 2W. Near the noise floor. Could be measurement artefact.
+          We publish it anyway — but we won't cite it yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="band">
+    <div class="band-label">Why these thresholds?</div>
+    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
+      Five watts of delta gives a ~5:1 signal-to-noise ratio against the P110
+      noise floor — enough to be confident the task is the cause, not variance.
+      Ten polls means ten seconds of measurement. Short tasks like TinyLlama
+      inference (1–4s total) often land in yellow or red. That's not a failure
+      — it tells us to run the task in batch mode to accumulate measurement time.
+    </p>
+    <p style="color:#555;line-height:1.7;max-width:560px">
+      The thresholds are configurable in lab Settings and applied consistently
+      across video, LLM, and image generation results.
+      On any result page, click a 🟢 🟡 🔴 badge for a quick reminder.
+    </p>
+  </div>
+
+  <div class="btn-row" style="margin-top:0.5rem">
+    <button class="btn btn-primary" onclick="goStep(5)">See findings →</button>
+    <button class="btn btn-secondary" onclick="goStep(1)">← Start over</button>
+  </div>
+</div>
+
+<!-- Step 5: Findings -->
+<div class="step" id="step-5">
   <h1>Findings</h1>
   <p style="color:#555;font-size:0.85rem;margin-bottom:1.5rem">
     Greening of Streaming · WattLab · GoS1</p>
@@ -2054,7 +2161,7 @@ let currentStep = 0;
 let videoResult = null;
 let llmResult = null;
 let imageResult = null;
-const stepLabels = ['Welcome', 'Video Transcode', 'LLM Inference', 'Image Generation', 'Findings'];
+const stepLabels = ['Welcome', 'Video Transcode', 'LLM Inference', 'Image Generation', 'Confidence', 'Findings'];
 let streamTimer = null;
 let imageTimer = null;
 
@@ -2062,7 +2169,7 @@ let imageTimer = null;
 function goStep(n) {{
   document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
   document.getElementById('step-' + n).classList.add('active');
-  for (let i = 0; i < 5; i++) {{
+  for (let i = 0; i < 6; i++) {{
     const dot = document.getElementById('dot-' + i);
     dot.className = 'dot' + (i < n ? ' done' : i === n ? ' active' : '');
   }}
@@ -2077,7 +2184,7 @@ function goStep(n) {{
   if (n === 1 && videoResult) revealNext(1);
   if (n === 2 && llmResult) revealNext(2);
   if (n === 3 && imageResult) revealNext(3);
-  if (n === 4) buildSummary();
+  if (n === 5) buildSummary();
 }}
 
 function revealNext(n) {{
@@ -2622,6 +2729,7 @@ function buildSummary() {{
     </p>`;
 }}
 </script>
+    {_CONF_HELP_WIDGET}
     {_FOOTER}
 </body>
 </html>"""
@@ -2957,6 +3065,7 @@ function renderResult(r) {{
     </div>`;
 }}
 </script>
+    {_CONF_HELP_WIDGET}
     {_FOOTER}
 </body>
 </html>"""
