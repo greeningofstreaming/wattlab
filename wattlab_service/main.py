@@ -1799,6 +1799,13 @@ _DEMO_HTML = f"""<!DOCTYPE html>
               margin-top:0.5rem}}
   .divider{{border:none;border-top:1px solid #111;margin:1.5rem 0}}
 
+  /* Three-band layout */
+  .band{{margin-bottom:1.75rem;padding-bottom:1.75rem;border-bottom:1px solid #0d0d0d}}
+  .band-label{{color:#333;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;
+               font-family:monospace;margin-bottom:0.6rem}}
+  .limitation{{color:#2a2a2a;font-size:0.75rem;margin-top:1rem;line-height:1.6;
+               font-family:monospace;border-left:1px solid #1a1a1a;padding-left:0.75rem}}
+
   /* Progress */
   .progress-note{{color:#ffaa00;font-family:monospace;font-size:0.85rem;
                   margin-top:1rem}}
@@ -1872,39 +1879,44 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 <!-- Step 1: Video -->
 <div class="step" id="step-1">
   <h1>Video Transcode</h1>
-  <p style="color:#555;font-size:0.85rem;margin-bottom:1.5rem">Step 1 of 2</p>
 
-  <p style="color:#aaa;line-height:1.8;max-width:560px;margin-bottom:1rem">
-    We encode the same 4K source clip (Meridian, Netflix Open Content, CC BY 4.0)
-    to 1080p H.264 — first in software (CPU) then with hardware acceleration (GPU).
-    Both runs use the same input and quality target. Energy is measured throughout.
-  </p>
-
-  <details>
-    <summary>Measurement protocol</summary>
-    <p>10-second baseline measurement (×1s polls) before each run.
-    P110 sampled every second during encode. A 60-second thermal cooldown
-    separates the two runs so GPU baseline reflects true idle state.
-    Confidence flag: 🟢 Repeatable = ΔW &gt; 5W and ≥ 10 polls.</p>
-    <p>Codec: libx264 (CPU) · h264_vaapi (GPU) · CRF/QP 23 · 1080p output.
-    Source: 4K, 812 MB. Encode time ~2–3 min CPU, ~90s GPU.</p>
-  </details>
-
-  <details>
-    <summary>Why CPU vs GPU?</summary>
-    <p>The answer is not obvious: GPU is faster but draws more peak power.
-    Whether it saves energy depends on how long the task runs. WattLab
-    measures the crossover point empirically. Our Session 1 data shows
-    GPU uses 9.7% more total energy despite being 34.5% faster on this workload.</p>
-  </details>
-
-  <div id="video-action">
-    <div class="btn-row" id="video-btns" style="display:none">
-      <button class="btn btn-primary" id="btn-run-video" onclick="runDemoVideo()">
-        Run new measurement (~5 min)</button>
-    </div>
-    <div id="video-status"></div>
+  <div class="band">
+    <div class="band-label">What this shows</div>
+    <p style="color:#aaa;line-height:1.8;max-width:560px">
+      Whether transcoding to the same quality target uses more energy on CPU or GPU —
+      and whether the faster path is also the more efficient one.
+    </p>
   </div>
+
+  <div class="band">
+    <div class="band-label">What we're doing</div>
+    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
+      Encoding a 4K clip (Meridian, Netflix Open Content, CC BY 4.0) to 1080p H.264 —
+      once in software (libx264) and once with hardware acceleration (h264_vaapi).
+      Same source. Same quality target. P110 sampled every second throughout.
+    </p>
+    <details>
+      <summary>How this is measured</summary>
+      <p>10s idle baseline before each run. 60s thermal cooldown between CPU and GPU.
+      Energy = ΔW × duration / 3600. Confidence 🟢 = ΔW &gt; 5W and ≥ 10 polls.</p>
+      <p>Source: 812 MB, 4K. Encode time ~2–3 min CPU, ~90s GPU.
+      Previous runs: CPU 174s / 4.06 Wh mean · GPU 114s / 4.42 Wh mean (4 runs).</p>
+    </details>
+  </div>
+
+  <div>
+    <div class="band-label">Result</div>
+    <div id="video-action">
+      <div class="btn-row" id="video-btns" style="display:none">
+        <button class="btn btn-primary" id="btn-run-video" onclick="runDemoVideo()">
+          Run new measurement (~5 min)</button>
+      </div>
+      <div id="video-status"></div>
+    </div>
+    <p class="limitation">Scope: device layer only (GoS1). Network, CDN, and CPE not included.
+    A faster encode does not automatically mean less energy — this measures total Wh, not rate.</p>
+  </div>
+
   <div id="next-1" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
     <div class="btn-row">
       <button class="btn btn-primary" onclick="goStep(2)">Next: LLM inference →</button>
@@ -1916,39 +1928,49 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 <!-- Step 2: LLM -->
 <div class="step" id="step-2">
   <h1>LLM Inference</h1>
-  <p style="color:#555;font-size:0.85rem;margin-bottom:1.5rem">Step 2 of 2</p>
 
-  <p style="color:#aaa;line-height:1.8;max-width:560px;margin-bottom:1rem">
-    We run a fixed technical prompt through Mistral 7B and measure how much
-    energy each generated token costs. The model is unloaded before the
-    baseline measurement so we capture the true cold-start cost.
-  </p>
-
-  <details>
-    <summary>Measurement protocol</summary>
-    <p>Model unloaded from VRAM. 3-second settle. 10-second baseline.
-    Single inference run. P110 at 1-second intervals throughout.
-    Primary metric: mWh per output token (energy per token of generated text).</p>
-    <p>Model: Mistral 7B (4.4 GB, ROCm GPU). Prompt: T3 Long —
-    "Write a detailed technical briefing on network energy attribution
-    challenges in streaming impact measurement."</p>
-  </details>
-
-  <details>
-    <summary>Why mWh per token?</summary>
-    <p>Token count varies between models and prompts, making raw Wh figures
-    hard to compare. Energy per token normalises for output length, letting
-    us compare TinyLlama (0.06 mWh/tok) against Mistral 7B (0.94 mWh/tok)
-    on the same basis. TinyLlama is ~15× more energy-efficient per token.</p>
-  </details>
-
-  <div id="llm-action">
-    <div class="btn-row" id="llm-btns" style="display:none">
-      <button class="btn btn-primary" id="btn-run-llm" onclick="runDemoLLM()">
-        Run new measurement (~3 min)</button>
-    </div>
-    <div id="llm-status"></div>
+  <div class="band">
+    <div class="band-label">What this shows</div>
+    <p style="color:#aaa;line-height:1.8;max-width:560px">
+      How much energy each generated token costs — and how model size
+      translates into energy use per unit of output.
+    </p>
   </div>
+
+  <div class="band">
+    <div class="band-label">What we're doing</div>
+    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
+      Running a fixed prompt (T3 Long — network energy attribution briefing)
+      through Mistral 7B cold: model unloaded before baseline so we capture
+      the true first-request cost. GPU inference via Ollama ROCm.
+    </p>
+    <details>
+      <summary>How this is measured</summary>
+      <p>Model unloaded from VRAM. 3s settle. 10s idle baseline. Single inference run.
+      P110 at 1s intervals. Primary metric: mWh per output token.</p>
+      <p>Model: Mistral 7B (4.4 GB). Previous result: 0.94 mWh/tok, ~47 tok/s.</p>
+    </details>
+    <details>
+      <summary>Why mWh per token?</summary>
+      <p>Token count varies between models and prompts, so raw Wh figures aren't
+      comparable. Energy per token lets us place TinyLlama (0.06 mWh/tok) and
+      Mistral 7B (0.94 mWh/tok) on the same axis — a ~15× difference.</p>
+    </details>
+  </div>
+
+  <div>
+    <div class="band-label">Result</div>
+    <div id="llm-action">
+      <div class="btn-row" id="llm-btns" style="display:none">
+        <button class="btn btn-primary" id="btn-run-llm" onclick="runDemoLLM()">
+          Run new measurement (~3 min)</button>
+      </div>
+      <div id="llm-status"></div>
+    </div>
+    <p class="limitation">Scope: device layer only (GoS1). No amortised training cost included.
+    mWh/token measures inference energy only — not the energy cost of training the model.</p>
+  </div>
+
   <div id="next-2" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
     <div class="btn-row">
       <button class="btn btn-primary" onclick="goStep(3)">Next: Image generation →</button>
@@ -1959,17 +1981,41 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
 <!-- Step 3: Image generation -->
 <div class="step" id="step-3">
-  <h1>Image generation</h1>
-  <p class="step-intro">How much energy does one AI image cost? WattLab measures the full device draw — not an estimate.</p>
-  <div class="method-box">
-    <strong>Protocol:</strong> Baseline (10s idle) → CPU diffusion (SD-Turbo, 8 steps) → P110 measurement.
-    A random colour modifier is appended to prove the image is generated live, not replayed.
+  <h1>Image Generation</h1>
+
+  <div class="band">
+    <div class="band-label">What this shows</div>
+    <p style="color:#aaa;line-height:1.8;max-width:560px">
+      How much energy one AI-generated image costs — measured end to end on
+      real hardware, not estimated from TDP or cloud benchmarks.
+    </p>
   </div>
 
-  <div id="image-btns" class="btn-row" style="display:none">
-    <button class="btn btn-primary" onclick="runDemoImage()">Generate &amp; measure</button>
+  <div class="band">
+    <div class="band-label">What we're doing</div>
+    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
+      Running SD-Turbo (stabilityai/sd-turbo, CPU, 8 steps, 512×512) with a
+      randomly modified prompt — the colour modifier changes each run to prove
+      the image is generated live, not replayed from cache.
+    </p>
+    <details>
+      <summary>How this is measured</summary>
+      <p>10s idle baseline. CPU diffusion run. P110 at 1s intervals.
+      Metric: Wh per image = ΔW × generation_time / 3600.</p>
+      <p>Previous result: 0.21 Wh/image, 12s, ~30W delta above idle.</p>
+    </details>
   </div>
-  <div id="image-status"></div>
+
+  <div>
+    <div class="band-label">Result</div>
+    <div id="image-btns" class="btn-row" style="display:none">
+      <button class="btn btn-primary" onclick="runDemoImage()">Generate &amp; measure</button>
+    </div>
+    <div id="image-status"></div>
+    <p class="limitation">Scope: device layer only (GoS1). Network and storage excluded.
+    This measures one image on one machine — not the energy cost of a hosted API call.</p>
+  </div>
+
   <div id="next-3" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
     <div class="btn-row">
       <button class="btn btn-primary" onclick="goStep(4)">See findings →</button>
