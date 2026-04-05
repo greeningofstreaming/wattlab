@@ -7,6 +7,50 @@ Scope: device layer only (GoS1). Network, CDN, and CPE explicitly excluded.
 
 ---
 
+## Session 7 — 2026-04-05
+
+### What we did
+
+**Demo renamed to Guided Tour · Settings read-only on public internet · nginx rate limiting · Queue cap**
+
+#### Demo mode → Guided Tour
+- Nav link on home page: "◆ Demo mode" → "◆ Guided Tour"
+- Page `<title>` updated: "WattLab — Guided Tour · Greening of Streaming"
+- Welcome step button changed: "Start Tour →"
+- URL unchanged: `/demo`
+
+#### Settings: graceful read-only from public internet
+Previous approach was a hard 403. Replaced with a friendlier read-only view:
+- Public visitors (Host header contains `greeningofstreaming.org`) see all values as plain-text spans, no inputs, no Save button
+- Banner: "🔒 Read-only — settings can only be modified from the lab network or SSH tunnel."
+- Subtitle: "WattLab · GoS1 · Read-only" (vs "WattLab · GoS1 · Lab mode" on LAN/SSH tunnel)
+- POST `/settings` still returns 403 if not local — belt and suspenders
+- `_is_local(request)` remains the single gating function for both GET and POST
+
+#### nginx: removed /settings 403, added rate limiting
+- Removed `location /settings { return 403; }` — no longer needed since FastAPI degrades gracefully
+- Added `limit_req_zone` (4 job submissions/min per IP, burst 2) and `limit_conn_zone` (3 simultaneous per IP)
+- New rate-limited location block for job submission endpoints: `/video/use-source`, `/video/upload`, `/llm/run`, `/llm/run-all`, `/image/start`
+- HTTPS server block moved to commented-out section (uncomment after cert is issued)
+
+#### Queue: hard cap added
+- `MAX_QUEUE_DEPTH = 8` (total queued + running)
+- `enqueue()` now returns `None` when full instead of always returning a position
+- All 4 submit endpoints check for `None` and return HTTP 429 "Queue full — try again later."
+
+#### UI navigation cleanup
+- Added `_BACK` global: "← Dashboard" link used on all sub-pages
+- Added `_FOOTER` global: GoS logo in a footer `<footer>` element, consistent across pages
+- Home: removed fixed-position logo div, logo now in footer
+- Video + LLM pages: replaced inline `{_LOGO}` with `{_BACK}` at top, old "← Back to power monitor" anchor removed, `{_FOOTER}` added at bottom
+
+### Deferred (unchanged from Session 6)
+- DNS A record + SSL cert (after Easter, pending Wix admin access)
+- GPU image generation measurement figures (next clean run)
+- Image page elapsed time in progress bar
+
+---
+
 ## Session 6 — 2026-04-05
 
 ### What we did

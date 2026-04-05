@@ -1,5 +1,6 @@
 import asyncio
 import io
+import ipaddress
 import json
 import uuid
 from pathlib import Path
@@ -22,10 +23,14 @@ jobs = {}
 pending_queue = []          # list of {"job_id", "type", "label", "coro_fn"}
 queue_event = asyncio.Event()
 current_job_id = None       # job currently executing
+MAX_QUEUE_DEPTH = 8         # total queued + running; 429 beyond this
 
 
-def enqueue(job_id: str, job_type: str, label: str, coro_fn) -> int:
-    """Add a job to the FIFO queue. Returns 1-based queue position."""
+def enqueue(job_id: str, job_type: str, label: str, coro_fn):
+    """Add a job to the FIFO queue. Returns 1-based position, or None if queue is full."""
+    total = len(pending_queue) + (1 if current_job_id else 0)
+    if total >= MAX_QUEUE_DEPTH:
+        return None
     position = len(pending_queue) + 1
     jobs[job_id] = {"stage": "queued", "queue_position": position, "result": None, "error": None}
     pending_queue.append({"job_id": job_id, "type": job_type, "label": label, "coro_fn": coro_fn})
@@ -72,6 +77,8 @@ _LOGO = (
     f'<span style="color:#444;font-size:0.72rem;font-family:monospace">'
     f'greeningofstreaming.org</span></a>'
 )
+_BACK = '<a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Dashboard</a>'
+_FOOTER = f'<footer style="margin-top:3rem;padding-top:1rem;border-top:1px solid #111">{_LOGO}</footer>'
 
 # --- P110 ---
 
@@ -112,7 +119,6 @@ async def index():
     </style>
 </head>
 <body>
-    <div style="position:fixed;top:1rem;left:1.5rem">{_LOGO}</div>
     <div class="watts">{watts:.1f} W</div>
     <div class="label">GoS1 current power draw</div>
     <div class="scope">Device layer only · Tapo P110 · refreshes every 10s</div>
@@ -120,10 +126,11 @@ async def index():
         <a href="/video">▶ Video transcode test</a>
         <a href="/llm">▶ LLM inference test</a>
         <a href="/image">▶ Image generation test</a>
-        <a href="/demo">◆ Demo mode</a>
+        <a href="/demo">◆ Guided Tour</a>
         <a href="/queue-status">⏱ Queue</a>
         <a href="/settings">⚙ Settings</a>
     </div>
+    {_FOOTER}
 </body>
 </html>"""
 
@@ -215,8 +222,8 @@ async def video_page():
     </style>
 </head>
 <body>
+    {_BACK}
     {busy_banner}
-    {_LOGO}
     <h1>Video Transcode Energy Test</h1>
     <div class="subtitle">Greening of Streaming · WattLab · GoS1</div>
 
@@ -308,7 +315,6 @@ async def video_page():
     <button id="runBtn" onclick="uploadAndRun()">Upload & Measure</button>
 
     <div id="status"></div>
-    <a class="back" href="/">← Back to power monitor</a>
     <div id="prev-runs" style="margin-top:2rem;border-top:1px solid #111;padding-top:1.5rem"></div>
 
     <script>
@@ -624,6 +630,7 @@ async def video_page():
 
     loadPrevRuns();
     </script>
+    {_FOOTER}
 </body>
 </html>"""
 
@@ -664,6 +671,8 @@ async def use_preloaded_source(
         await run_job(job_id, source["path"], preset, False)
 
     position = enqueue(job_id, "video", label, coro)
+    if position is None:
+        return JSONResponse({"error": "Queue full — try again later."}, status_code=429)
     return {"job_id": job_id, "queue_position": position}
 
 @app.post("/video/upload")
@@ -692,6 +701,8 @@ async def upload_video(
         await run_job(job_id, input_path, preset, True)
 
     position = enqueue(job_id, "video", label, coro)
+    if position is None:
+        return JSONResponse({"error": "Queue full — try again later."}, status_code=429)
     return {"job_id": job_id, "queue_position": position}
 
 
@@ -799,7 +810,7 @@ async def llm_page():
     </style>
 </head>
 <body>
-    {_LOGO}
+    {_BACK}
     <h1>LLM Inference Energy Test</h1>
     <div class="subtitle">Greening of Streaming · WattLab · GoS1</div>
     <div class="info">
@@ -897,7 +908,6 @@ async def llm_page():
         </button>
     </div>
     <div id="status"></div>
-    <a class="back" href="/">← Back to power monitor</a>
     <div id="prev-runs" style="margin-top:2rem;border-top:1px solid #111;padding-top:1.5rem"></div>
 
     <script>
@@ -1418,6 +1428,7 @@ async def llm_page():
 
     loadPrevRuns();
     </script>
+    {_FOOTER}
 </body>
 </html>"""
 
@@ -1448,6 +1459,8 @@ async def llm_run(
         await run_llm_job(job_id, model_key, task_key, repeats, warm, effective_prompt, device)
 
     position = enqueue(job_id, "llm", label, coro)
+    if position is None:
+        return JSONResponse({"error": "Queue full — try again later."}, status_code=429)
     return {"job_id": job_id, "queue_position": position}
 
 
@@ -1514,6 +1527,8 @@ async def llm_run_all(
         await run_llm_all_job(job_id, model_key, warm, device)
 
     position = enqueue(job_id, "llm", label, coro)
+    if position is None:
+        return JSONResponse({"error": "Queue full — try again later."}, status_code=429)
     return {"job_id": job_id, "queue_position": position}
 
 
@@ -1586,16 +1601,51 @@ async def results_download_csv(job_type: str, job_id: str):
 # --- Settings ---
 
 def _is_local(request: Request) -> bool:
-    """True if request came via SSH tunnel or LAN (not the public domain)."""
-    host = request.headers.get("host", "")
-    return "greeningofstreaming.org" not in host
+    """True if the request originates from a loopback or private IP.
+    Uses X-Real-IP (set by nginx) when present, otherwise the direct client IP.
+    This blocks both domain-based and raw IP-based public access."""
+    ip_str = request.headers.get("x-real-ip") or (request.client.host if request.client else "")
+    try:
+        addr = ipaddress.ip_address(ip_str)
+        return addr.is_loopback or addr.is_private
+    except ValueError:
+        return False
 
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    if not _is_local(request):
-        return HTMLResponse("<h1>403 Forbidden</h1><p>Settings are not available on the public URL.</p>", status_code=403)
     s = cfg.load()
+    local = _is_local(request)
+
+    def field(fid, val, min_, max_, unit, hint="", step=None):
+        step_attr = f' step="{step}"' if step else ""
+        if local:
+            ctrl = (f'<input type="number" id="{fid}" min="{min_}" max="{max_}"{step_attr}'
+                    f' value="{val}" style="background:#111;border:1px solid #333;color:#e0e0e0;'
+                    f'font-family:monospace;font-size:0.9rem;padding:0.3rem 0.5rem;'
+                    f'width:80px;text-align:right">')
+        else:
+            ctrl = f'<span style="font-family:monospace;color:#00ff99;font-size:0.95rem">{val}</span>'
+        hint_html = f'<div style="color:#333;font-size:0.72rem;margin-top:0.2rem">{hint}</div>' if hint else ""
+        return (f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+                f'padding:0.5rem 0;border-bottom:1px solid #0d0d0d;gap:1rem">'
+                f'<div><label style="color:#aaa;font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
+                f'{hint_html}</div>'
+                f'<div style="display:flex;align-items:baseline;gap:0.5rem">'
+                f'{ctrl}<span style="color:#555;font-size:0.8rem">{unit}</span>'
+                f'</div></div>')
+
+    notice = ('' if local else
+              '<div style="background:#111;border-left:3px solid #555;padding:0.75rem 1rem;'
+              'margin-bottom:1.5rem;font-size:0.82rem;color:#555">'
+              '🔒 Read-only — settings can only be modified from the lab network or SSH tunnel.'
+              '</div>')
+    save_block = ('<button onclick="saveSettings()" style="background:#00ff99;color:#000;border:none;'
+                  'padding:0.75rem 2rem;cursor:pointer;font-family:monospace;font-size:1rem;margin-top:2rem">'
+                  'Save Settings</button><div id="msg" style="margin-top:1rem;font-size:0.85rem"></div>'
+                  if local else '')
+    subtitle = 'WattLab · GoS1 · Lab mode' if local else 'WattLab · GoS1 · Read-only'
+
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -1609,108 +1659,28 @@ async def settings_page(request: Request):
         .section {{ color:#444; font-size:0.72rem; text-transform:uppercase;
                     letter-spacing:0.05em; margin:1.5rem 0 0.75rem;
                     padding-bottom:0.4rem; border-bottom:1px solid #111; }}
-        .row {{ display:flex; justify-content:space-between; align-items:baseline;
-                padding:0.5rem 0; border-bottom:1px solid #0d0d0d; gap:1rem; }}
-        .row label {{ color:#aaa; font-size:0.85rem; flex:1; }}
-        .row .hint {{ color:#333; font-size:0.72rem; margin-top:0.2rem; }}
-        .row-right {{ display:flex; align-items:baseline; gap:0.5rem; }}
-        input[type=number] {{ background:#111; border:1px solid #333; color:#e0e0e0;
-                              font-family:monospace; font-size:0.9rem;
-                              padding:0.3rem 0.5rem; width:80px; text-align:right; }}
         input[type=number]:focus {{ border-color:#00ff99; outline:none; }}
-        .unit {{ color:#555; font-size:0.8rem; }}
-        button {{ background:#00ff99; color:#000; border:none; padding:0.75rem 2rem;
-                  cursor:pointer; font-family:monospace; font-size:1rem; margin-top:2rem; }}
-        button:hover {{ background:#00dd88; }}
-        #msg {{ margin-top:1rem; font-size:0.85rem; }}
-        a.back {{ color:#555; text-decoration:none; font-size:0.82rem;
-                  display:inline-block; margin-top:1.5rem; }}
-        a.back:hover {{ color:#00ff99; }}
     </style>
 </head>
 <body>
-    {_LOGO}
+    {_BACK}
     <h1>Settings</h1>
-    <div class="subtitle">WattLab · GoS1 · Lab mode</div>
+    <div class="subtitle">{subtitle}</div>
+    {notice}
 
     <div class="section">Measurement</div>
-
-    <div class="row">
-        <div><label>Baseline polls</label>
-        <div class="hint">× 1s = baseline window duration</div></div>
-        <div class="row-right">
-            <input type="number" id="baseline_polls" min="5" max="60" value="{s['baseline_polls']}">
-            <span class="unit">× 1s</span>
-        </div>
-    </div>
-
-    <div class="row">
-        <div><label>Video cooldown</label>
-        <div class="hint">Rest between CPU and GPU runs (Both mode)</div></div>
-        <div class="row-right">
-            <input type="number" id="video_cooldown_s" min="10" max="300" value="{s['video_cooldown_s']}">
-            <span class="unit">s</span>
-        </div>
-    </div>
-
-    <div class="row">
-        <div><label>LLM rest between runs</label>
-        <div class="hint">Pause between each run in batch mode</div></div>
-        <div class="row-right">
-            <input type="number" id="llm_rest_s" min="5" max="120" value="{s['llm_rest_s']}">
-            <span class="unit">s</span>
-        </div>
-    </div>
-
-    <div class="row">
-        <div><label>LLM unload settle</label>
-        <div class="hint">Wait after model unload before baseline</div></div>
-        <div class="row-right">
-            <input type="number" id="llm_unload_settle_s" min="1" max="30" value="{s['llm_unload_settle_s']}">
-            <span class="unit">s</span>
-        </div>
-    </div>
+    {field("baseline_polls",    s['baseline_polls'],    5,  60,  "× 1s",   "baseline window duration")}
+    {field("video_cooldown_s",  s['video_cooldown_s'],  10, 300, "s",      "rest between CPU and GPU runs")}
+    {field("llm_rest_s",        s['llm_rest_s'],        5,  120, "s",      "pause between runs in batch mode")}
+    {field("llm_unload_settle_s", s['llm_unload_settle_s'], 1, 30, "s",   "wait after model unload before baseline")}
 
     <div class="section">Confidence thresholds</div>
+    {field("conf_green_delta_w",  s['conf_green_delta_w'],  0, 50,  "W",     "🟢 green ΔW threshold", step=0.5)}
+    {field("conf_green_polls",    s['conf_green_polls'],    1, 100, "polls", "🟢 green minimum polls")}
+    {field("conf_yellow_delta_w", s['conf_yellow_delta_w'], 0, 20,  "W",     "🟡 yellow ΔW threshold", step=0.5)}
+    {field("conf_yellow_polls",   s['conf_yellow_polls'],   1, 50,  "polls", "🟡 yellow minimum polls")}
 
-    <div class="row">
-        <div><label>🟢 Green: ΔW &gt;</label>
-        <div class="hint">AND polls ≥ green polls</div></div>
-        <div class="row-right">
-            <input type="number" id="conf_green_delta_w" min="0" max="50" step="0.5" value="{s['conf_green_delta_w']}">
-            <span class="unit">W</span>
-        </div>
-    </div>
-
-    <div class="row">
-        <div><label>🟢 Green: polls ≥</label></div>
-        <div class="row-right">
-            <input type="number" id="conf_green_polls" min="1" max="100" value="{s['conf_green_polls']}">
-            <span class="unit">polls</span>
-        </div>
-    </div>
-
-    <div class="row">
-        <div><label>🟡 Yellow: ΔW ≥</label>
-        <div class="hint">OR polls ≥ yellow polls</div></div>
-        <div class="row-right">
-            <input type="number" id="conf_yellow_delta_w" min="0" max="20" step="0.5" value="{s['conf_yellow_delta_w']}">
-            <span class="unit">W</span>
-        </div>
-    </div>
-
-    <div class="row">
-        <div><label>🟡 Yellow: polls ≥</label></div>
-        <div class="row-right">
-            <input type="number" id="conf_yellow_polls" min="1" max="50" value="{s['conf_yellow_polls']}">
-            <span class="unit">polls</span>
-        </div>
-    </div>
-
-    <button onclick="saveSettings()">Save Settings</button>
-    <div id="msg"></div>
-    <a class="back" href="/">← Back to power monitor</a>
-
+    {save_block}
     <script>
     async function saveSettings() {{
         const fields = ['baseline_polls','video_cooldown_s','llm_rest_s','llm_unload_settle_s',
@@ -1737,6 +1707,7 @@ async def settings_page(request: Request):
         }}
     }}
     </script>
+    {_FOOTER}
 </body>
 </html>"""
 
@@ -1754,7 +1725,7 @@ async def settings_save(request: Request, data: dict):
 _DEMO_HTML = f"""<!DOCTYPE html>
 <html>
 <head>
-<title>WattLab — Demo · Greening of Streaming</title>
+<title>WattLab — Guided Tour · Greening of Streaming</title>
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
   body{{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0a;
@@ -1845,9 +1816,8 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 </style>
 </head>
 <body>
-
+    {_BACK}
 <div class="page-header">
-  {_LOGO}
   <div id="step-nav" class="step-nav">
     <span class="dot active" id="dot-0"></span>
     <span class="dot" id="dot-1"></span>
@@ -1893,7 +1863,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
   </details>
 
   <div class="btn-row">
-    <button class="btn btn-primary" onclick="goStep(1)">Start Demo →</button>
+    <button class="btn btn-primary" onclick="goStep(1)">Start Tour →</button>
     <a href="/" class="btn btn-secondary" style="text-decoration:none;
        display:inline-block;line-height:1">← Lab mode</a>
   </div>
@@ -1929,13 +1899,17 @@ _DEMO_HTML = f"""<!DOCTYPE html>
   </details>
 
   <div id="video-action">
-    <div class="btn-row" id="video-btns">
+    <div class="btn-row" id="video-btns" style="display:none">
       <button class="btn btn-primary" id="btn-run-video" onclick="runDemoVideo()">
         Run new measurement (~5 min)</button>
-      <button class="btn btn-secondary" id="btn-prev-video" onclick="showPrevVideo()">
-        See last result</button>
     </div>
     <div id="video-status"></div>
+  </div>
+  <div id="next-1" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="goStep(2)">Next: LLM inference →</button>
+      <button class="btn btn-secondary" onclick="resetVideoStep()">Run again</button>
+    </div>
   </div>
 </div>
 
@@ -1969,13 +1943,17 @@ _DEMO_HTML = f"""<!DOCTYPE html>
   </details>
 
   <div id="llm-action">
-    <div class="btn-row" id="llm-btns">
+    <div class="btn-row" id="llm-btns" style="display:none">
       <button class="btn btn-primary" id="btn-run-llm" onclick="runDemoLLM()">
         Run new measurement (~3 min)</button>
-      <button class="btn btn-secondary" id="btn-prev-llm" onclick="showPrevLLM()">
-        See last result</button>
     </div>
     <div id="llm-status"></div>
+  </div>
+  <div id="next-2" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="goStep(3)">Next: Image generation →</button>
+      <button class="btn btn-secondary" onclick="resetLLMStep()">Run again</button>
+    </div>
   </div>
 </div>
 
@@ -1988,11 +1966,16 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     A random colour modifier is appended to prove the image is generated live, not replayed.
   </div>
 
-  <div id="image-btns" class="btn-row">
+  <div id="image-btns" class="btn-row" style="display:none">
     <button class="btn btn-primary" onclick="runDemoImage()">Generate &amp; measure</button>
-    <button class="btn btn-secondary" onclick="showPrevImage()">See previous run</button>
   </div>
   <div id="image-status"></div>
+  <div id="next-3" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="goStep(4)">See findings →</button>
+      <button class="btn btn-secondary" onclick="resetImageStep()">Run again</button>
+    </div>
+  </div>
 </div>
 
 <!-- Step 4: Summary -->
@@ -2025,7 +2008,7 @@ let currentStep = 0;
 let videoResult = null;
 let llmResult = null;
 let imageResult = null;
-const stepLabels = ['Welcome', 'Video', 'LLM', 'Image', 'Findings'];
+const stepLabels = ['Welcome', 'Video Transcode', 'LLM Inference', 'Image Generation', 'Findings'];
 let streamTimer = null;
 let imageTimer = null;
 
@@ -2042,7 +2025,31 @@ function goStep(n) {{
   lbl.className = 'label active';
   currentStep = n;
   window.scrollTo(0, 0);
+  if (n === 1 && !videoResult) loadVideoStep();
+  if (n === 2 && !llmResult) loadLLMStep();
+  if (n === 3 && !imageResult) loadImageStep();
+  if (n === 1 && videoResult) revealNext(1);
+  if (n === 2 && llmResult) revealNext(2);
+  if (n === 3 && imageResult) revealNext(3);
   if (n === 4) buildSummary();
+}}
+
+function revealNext(n) {{
+  const el = document.getElementById('next-' + n);
+  if (el) el.style.display = 'block';
+}}
+
+function loadVideoStep() {{
+  document.getElementById('video-status').innerHTML = '<p class="progress-note" style="color:#555">Loading last result…</p>';
+  showPrevVideo();
+}}
+function loadLLMStep() {{
+  document.getElementById('llm-status').innerHTML = '<p class="progress-note" style="color:#555">Loading last result…</p>';
+  showPrevLLM();
+}}
+function loadImageStep() {{
+  document.getElementById('image-status').innerHTML = '<p class="progress-note" style="color:#555">Loading last result…</p>';
+  showPrevImage();
 }}
 
 // ─── Live power ───────────────────────────────────────────────────────────────
@@ -2071,16 +2078,12 @@ function fmt(v, dec=2) {{ return v != null ? Number(v).toFixed(dec) : '—'; }}
 // ─── Previous run ─────────────────────────────────────────────────────────────
 async function showPrevVideo() {{
   document.getElementById('video-btns').style.display = 'none';
-  document.getElementById('video-status').innerHTML =
-    '<p class="progress-note">Loading last result…</p>';
   try {{
     const resp = await fetch('/results/video/list');
     const list = await resp.json();
     if (!list || list.length === 0) {{
-      document.getElementById('video-status').innerHTML =
-        '<p class="progress-note" style="color:#555">No previous runs found.</p>' +
-        '<div class="btn-row" style="margin-top:1rem">' +
-        '<button class="btn btn-primary" onclick="runDemoVideo()">Run new measurement</button></div>';
+      document.getElementById('video-status').innerHTML = '';
+      document.getElementById('video-btns').style.display = 'flex';
       return;
     }}
     // Load full result for the most recent job
@@ -2098,16 +2101,12 @@ async function showPrevVideo() {{
 
 async function showPrevLLM() {{
   document.getElementById('llm-btns').style.display = 'none';
-  document.getElementById('llm-status').innerHTML =
-    '<p class="progress-note">Loading last result…</p>';
   try {{
     const resp = await fetch('/results/llm/list');
     const list = await resp.json();
     if (!list || list.length === 0) {{
-      document.getElementById('llm-status').innerHTML =
-        '<p class="progress-note" style="color:#555">No previous runs found.</p>' +
-        '<div class="btn-row" style="margin-top:1rem">' +
-        '<button class="btn btn-primary" onclick="runDemoLLM()">Run new measurement</button></div>';
+      document.getElementById('llm-status').innerHTML = '';
+      document.getElementById('llm-btns').style.display = 'flex';
       return;
     }}
     const meta = list[0];
@@ -2122,28 +2121,6 @@ async function showPrevLLM() {{
   }}
 }}
 
-// Check on load whether previous results exist and update button labels
-async function checkPrevResults() {{
-  try {{
-    const [vr, lr] = await Promise.all([
-      fetch('/results/video/list').then(r => r.json()),
-      fetch('/results/llm/list').then(r => r.json()),
-    ]);
-    if (vr && vr.length > 0) {{
-      const btn = document.getElementById('btn-prev-video');
-      btn.textContent = 'See last result (' + timeAgo(vr[0].saved_at) + ')';
-    }} else {{
-      document.getElementById('btn-prev-video').disabled = true;
-    }}
-    if (lr && lr.length > 0) {{
-      const btn = document.getElementById('btn-prev-llm');
-      btn.textContent = 'See last result (' + timeAgo(lr[0].saved_at) + ')';
-    }} else {{
-      document.getElementById('btn-prev-llm').disabled = true;
-    }}
-  }} catch(e) {{}}
-}}
-checkPrevResults();
 
 // ─── Run new video measurement ────────────────────────────────────────────────
 async function runDemoVideo() {{
@@ -2297,62 +2274,94 @@ function renderVideoResult(r, savedAt, isPrev) {{
   }}
   document.getElementById('video-status').innerHTML = html;
   document.getElementById('video-btns').style.display = 'none';
-  // Show Next button
-  document.getElementById('video-status').innerHTML +=
-    '<div class="btn-row" style="margin-top:1.5rem">' +
-    '<button class="btn btn-primary" onclick="goStep(2)">Next: LLM inference →</button>' +
-    '<button class="btn btn-secondary" onclick="resetVideoStep()">Run again</button></div>';
+  revealNext(1);
 }}
 
 function renderLLMResult(r, savedAt, isPrev) {{
   const prevNote = isPrev ? '<p class="prev-note">↩ Previous run · ' + timeAgo(savedAt) + '</p>' : '';
-  const e = r.energy || (r.runs && r.runs[r.runs.length-1].energy);
-  const inf = r.inference || (r.runs && r.runs[r.runs.length-1].inference);
-  const modeNote = r.warm ? '🌡 Warm' : '❄ Cold';
-  const html = prevNote + `<div class="result-card">
-    <div class="kpi-row">
-      <div class="kpi">
-        <div class="val">${{fmt(e.mwh_per_token,4)}}</div>
-        <div class="lbl">mWh / token</div>
+  let html = prevNote;
+
+  if (r.mode === 'both') {{
+    // CPU vs GPU comparison result
+    const ce = r.cpu && r.cpu.energy, ge = r.gpu && r.gpu.energy;
+    const ci = r.cpu && r.cpu.inference, gi = r.gpu && r.gpu.inference;
+    const a = r.analysis || {{}};
+    html += `<div class="result-card">
+      <p class="headline">${{a.finding || ''}}</p>
+      <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem">
+        <div style="flex:1;min-width:180px">
+          <div style="color:#444;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem">CPU</div>
+          <div class="kpi-row">
+            <div class="kpi"><div class="val">${{fmt(ce && ce.mwh_per_token,4)}}</div><div class="lbl">mWh/token</div></div>
+            <div class="kpi"><div class="val">${{fmt(ci && ci.tokens_per_sec,1)}}</div><div class="lbl">tok/s</div></div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:180px">
+          <div style="color:#444;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem">GPU</div>
+          <div class="kpi-row">
+            <div class="kpi"><div class="val">${{fmt(ge && ge.mwh_per_token,4)}}</div><div class="lbl">mWh/token</div></div>
+            <div class="kpi"><div class="val">${{fmt(gi && gi.tokens_per_sec,1)}}</div><div class="lbl">tok/s</div></div>
+          </div>
+        </div>
       </div>
-      <div class="kpi">
-        <div class="val">${{fmt(inf.tokens_per_sec,1)}}</div>
-        <div class="lbl">tokens / sec</div>
+      <div class="conf-badge">${{ce ? ce.confidence.flag : ''}} CPU · ${{ge ? ge.confidence.flag : ''}} GPU · ${{r.model_label}}</div>
+      <p class="scope-note">Device layer only (GoS1). No amortised training cost.</p>
+    </div>`;
+  }} else {{
+    // single or batch
+    let e = r.energy;
+    let inf = r.inference;
+    if (!e && r.runs && r.runs.length) {{
+      e = r.runs[r.runs.length-1].energy;
+      inf = r.runs[r.runs.length-1].inference;
+    }}
+    if (!e && r.summary) {{
+      // batch summary only — reconstruct a minimal e object
+      e = {{ mwh_per_token: r.summary.mwh_per_token_mean, delta_e_wh: r.summary.delta_e_wh_mean,
+             confidence: {{flag:'—',label:'see runs'}}, delta_w: null }};
+      inf = {{ tokens_per_sec: r.summary.tokens_per_sec_mean, output_tokens: '—', response: '' }};
+    }}
+    if (!e) {{
+      document.getElementById('llm-btns').style.display = 'flex';
+      document.getElementById('llm-status').innerHTML = '<p class="progress-note" style="color:#555">Result format not recognised — run a new measurement.</p>';
+      return;
+    }}
+    const modeNote = r.warm ? '🌡 Warm' : '❄ Cold';
+    html += `<div class="result-card">
+      <div class="kpi-row">
+        <div class="kpi"><div class="val">${{fmt(e.mwh_per_token,4)}}</div><div class="lbl">mWh / token</div></div>
+        <div class="kpi"><div class="val">${{fmt(inf && inf.tokens_per_sec,1)}}</div><div class="lbl">tokens / sec</div></div>
+        <div class="kpi"><div class="val">${{fmt(e.delta_e_wh,4)}} Wh</div><div class="lbl">total energy</div></div>
+        <div class="kpi"><div class="val">${{inf ? inf.output_tokens : '—'}}</div><div class="lbl">output tokens</div></div>
       </div>
-      <div class="kpi">
-        <div class="val">${{fmt(e.delta_e_wh,4)}} Wh</div>
-        <div class="lbl">total energy</div>
-      </div>
-      <div class="kpi">
-        <div class="val">${{inf.output_tokens}}</div>
-        <div class="lbl">output tokens</div>
-      </div>
-    </div>
-    <div class="conf-badge">${{e.confidence.flag}} ${{e.confidence.label}} · ${{r.model_label}} · ${{modeNote}}</div>
-    <div class="response-preview">${{inf.response}}</div>
-    <p class="scope-note">Device layer only (GoS1). No amortised training cost.</p>
-  </div>`;
+      <div class="conf-badge">${{e.confidence.flag}} ${{e.confidence.label}} · ${{r.model_label}} · ${{modeNote}}</div>
+      ${{inf && inf.response ? '<div class="response-preview">' + inf.response + '</div>' : ''}}
+      <p class="scope-note">Device layer only (GoS1). No amortised training cost.</p>
+    </div>`;
+  }}
+
   document.getElementById('llm-status').innerHTML = html;
   document.getElementById('llm-btns').style.display = 'none';
-  document.getElementById('llm-status').innerHTML +=
-    '<div class="btn-row" style="margin-top:1.5rem">' +
-    '<button class="btn btn-primary" onclick="goStep(3)">Next: Image generation →</button>' +
-    '<button class="btn btn-secondary" onclick="resetLLMStep()">Run again</button></div>';
+  revealNext(2);
 }}
 
 function resetVideoStep() {{
+  videoResult = null;
   document.getElementById('video-btns').style.display = 'flex';
   document.getElementById('video-status').innerHTML = '';
-  checkPrevResults();
+  document.getElementById('next-1').style.display = 'none';
 }}
 function resetLLMStep() {{
+  llmResult = null;
   document.getElementById('llm-btns').style.display = 'flex';
   document.getElementById('llm-status').innerHTML = '';
-  checkPrevResults();
+  document.getElementById('next-2').style.display = 'none';
 }}
 function resetImageStep() {{
+  imageResult = null;
   document.getElementById('image-btns').style.display = 'flex';
   document.getElementById('image-status').innerHTML = '';
+  document.getElementById('next-3').style.display = 'none';
 }}
 
 // ─── Image ────────────────────────────────────────────────────────────────────
@@ -2409,14 +2418,11 @@ async function pollDemoImage(jobId) {{
 
 async function showPrevImage() {{
   document.getElementById('image-btns').style.display = 'none';
-  document.getElementById('image-status').innerHTML =
-    '<p class="progress-note">Loading last result…</p>';
   try {{
     const resp = await fetch('/results/image/list');
     const list = await resp.json();
     if (!list || list.length === 0) {{
-      document.getElementById('image-status').innerHTML =
-        '<p class="progress-note" style="color:#555">No previous runs found.</p>';
+      document.getElementById('image-status').innerHTML = '';
       document.getElementById('image-btns').style.display = 'flex';
       return;
     }}
@@ -2433,68 +2439,132 @@ async function showPrevImage() {{
 }}
 
 function renderDemoImageResult(r) {{
-  const e = r.energy;
-  const gen = r.generation;
-  const imgHtml = gen && gen.b64_png
-    ? '<img src="data:image/png;base64,' + gen.b64_png +
-      '" style="max-width:100%;border:1px solid #222;display:block;margin-top:1rem">' +
-      '<div style="color:#444;font-size:0.75rem;margin-top:0.5rem;font-style:italic">"' +
-      r.full_prompt + '"</div>'
-    : '';
-  document.getElementById('image-status').innerHTML =
-    '<div class="result-card">' +
-    '<div class="result-kpis">' +
-    '<div class="kpi"><div class="kval">' + fmt(e.delta_e_wh,4) + ' Wh</div>' +
-    '<div class="klbl">energy / image</div></div>' +
-    '<div class="kpi"><div class="kval">' + fmt(gen && gen.total_s,1) + 's</div>' +
-    '<div class="klbl">generation time</div></div>' +
-    '<div class="kpi"><div class="kval">' + fmt(e.delta_w,1) + ' W</div>' +
-    '<div class="klbl">delta above idle</div></div>' +
-    '</div>' +
-    '<div class="conf">' + e.confidence.flag + ' ' + e.confidence.label + '</div>' +
-    imgHtml +
-    '</div>' +
-    '<div class="btn-row" style="margin-top:1.5rem">' +
-    '<button class="btn btn-primary" onclick="goStep(4)">See findings →</button>' +
-    '<button class="btn btn-secondary" onclick="resetImageStep()">Run again</button></div>';
+  let html = '';
+  if (r.mode === 'both') {{
+    const ce = r.cpu && r.cpu.energy, ge = r.gpu && r.gpu.energy;
+    const cg = r.cpu && r.cpu.generation, gg = r.gpu && r.gpu.generation;
+    const a = r.analysis || {{}};
+    const cpuWh = ce && (ce.wh_per_image || ce.delta_e_wh);
+    const gpuWh = ge && (ge.wh_per_image || ge.delta_e_wh);
+    let imgs = '';
+    if (cg && cg.b64_png) imgs += '<div style="flex:1;min-width:150px"><div style="color:#444;font-size:0.7rem;margin-bottom:0.4rem">CPU</div>' +
+      '<img src="data:image/png;base64,' + cg.b64_png + '" style="max-width:100%;border:1px solid #222;display:block"></div>';
+    if (gg && gg.b64_png) imgs += '<div style="flex:1;min-width:150px"><div style="color:#444;font-size:0.7rem;margin-bottom:0.4rem">GPU</div>' +
+      '<img src="data:image/png;base64,' + gg.b64_png + '" style="max-width:100%;border:1px solid #222;display:block"></div>';
+    html = '<div class="result-card">' +
+      '<p class="headline">' + (a.finding || '') + '</p>' +
+      '<div class="kpi-row">' +
+      '<div class="kpi"><div class="val">' + fmt(cpuWh,4) + ' Wh</div><div class="lbl">CPU / image</div></div>' +
+      '<div class="kpi"><div class="val">' + fmt(gpuWh,4) + ' Wh</div><div class="lbl">GPU / image</div></div>' +
+      '<div class="kpi"><div class="val">' + fmt(cg && cg.gen_s,1) + 's / ' + fmt(gg && (gg.gen_s_per_image || gg.gen_s),1) + 's</div><div class="lbl">time CPU / GPU</div></div>' +
+      '</div>' +
+      (ce ? '<div class="conf-badge">' + ce.confidence.flag + ' CPU · ' + (ge ? ge.confidence.flag + ' GPU' : '') + '</div>' : '') +
+      '<div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:1rem">' + imgs + '</div>' +
+      '</div>';
+  }} else {{
+    const e = r.energy;
+    const gen = r.generation;
+    if (!e) {{
+      document.getElementById('image-btns').style.display = 'flex';
+      document.getElementById('image-status').innerHTML = '<p class="progress-note" style="color:#555">Result format not recognised — run a new measurement.</p>';
+      return;
+    }}
+    const wh = e.wh_per_image || e.delta_e_wh;
+    const imgHtml = gen && gen.b64_png
+      ? '<img src="data:image/png;base64,' + gen.b64_png +
+        '" style="max-width:100%;border:1px solid #222;display:block;margin-top:1rem">' +
+        '<div style="color:#444;font-size:0.75rem;margin-top:0.5rem;font-style:italic">"' +
+        (r.full_prompt || '') + '"</div>'
+      : '';
+    html = '<div class="result-card">' +
+      '<div class="kpi-row">' +
+      '<div class="kpi"><div class="val">' + fmt(wh,4) + ' Wh</div><div class="lbl">energy / image</div></div>' +
+      '<div class="kpi"><div class="val">' + fmt(gen && gen.total_s,1) + 's</div><div class="lbl">generation time</div></div>' +
+      '<div class="kpi"><div class="val">' + fmt(e.delta_w,1) + ' W</div><div class="lbl">delta above idle</div></div>' +
+      '</div>' +
+      '<div class="conf-badge">' + e.confidence.flag + ' ' + e.confidence.label + '</div>' +
+      imgHtml + '</div>';
+  }}
+  document.getElementById('image-status').innerHTML = html;
+  document.getElementById('image-btns').style.display = 'none';
+  revealNext(3);
 }}
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
 function buildSummary() {{
   const el = document.getElementById('summary-content');
   let rows = '';
+  try {{
 
-  if (videoResult && videoResult.mode === 'both') {{
-    const a = videoResult.analysis;
-    const ce = videoResult.cpu.energy, ge = videoResult.gpu.energy;
-    rows += `<tr><td>Video · CPU energy</td><td>${{fmt(ce.delta_e_wh,4)}} Wh ${{a.energy_winner==='CPU'?'✓':''}}</td></tr>`;
-    rows += `<tr><td>Video · GPU energy</td><td>${{fmt(ge.delta_e_wh,4)}} Wh ${{a.energy_winner==='GPU'?'✓':''}}</td></tr>`;
-    rows += `<tr><td>Video · Speed delta</td><td>GPU ${{a.speed_diff_pct}}% faster</td></tr>`;
-    rows += `<tr><td>Video · Finding</td><td style="color:#aaa;font-size:0.78rem">${{a.energy_winner}} used less energy</td></tr>`;
-  }} else if (videoResult) {{
-    rows += `<tr><td>Video result available</td><td style="color:#555">See Step 1</td></tr>`;
-  }} else {{
-    rows += `<tr><td>Video</td><td style="color:#333">No result this session</td></tr>`;
-  }}
+  // Video
+  try {{
+    if (videoResult && videoResult.mode === 'both') {{
+      const a = videoResult.analysis || {{}};
+      const ce = videoResult.cpu && videoResult.cpu.energy;
+      const ge = videoResult.gpu && videoResult.gpu.energy;
+      rows += `<tr><td>Video · CPU energy</td><td>${{fmt(ce && ce.delta_e_wh,4)}} Wh ${{a.energy_winner==='CPU'?'✓':''}}</td></tr>`;
+      rows += `<tr><td>Video · GPU energy</td><td>${{fmt(ge && ge.delta_e_wh,4)}} Wh ${{a.energy_winner==='GPU'?'✓':''}}</td></tr>`;
+      rows += `<tr><td>Video · Finding</td><td style="color:#aaa;font-size:0.78rem">${{a.finding || a.energy_winner + ' used less energy'}}</td></tr>`;
+    }} else if (videoResult) {{
+      const e = videoResult.energy || (videoResult.result && videoResult.result.energy);
+      rows += `<tr><td>Video · Energy</td><td>${{fmt(e && e.delta_e_wh,4)}} Wh</td></tr>`;
+    }} else {{
+      rows += `<tr><td>Video</td><td style="color:#333">—</td></tr>`;
+    }}
+  }} catch(err) {{ rows += `<tr><td>Video</td><td style="color:#555">error: ${{err.message}}</td></tr>`; }}
 
-  if (llmResult) {{
-    const e = llmResult.energy || (llmResult.runs && llmResult.runs[llmResult.runs.length-1].energy);
-    const inf = llmResult.inference || (llmResult.runs && llmResult.runs[llmResult.runs.length-1].inference);
-    rows += `<tr><td>LLM · Model</td><td>${{llmResult.model_label}}</td></tr>`;
-    rows += `<tr><td>LLM · Energy / token</td><td>${{fmt(e.mwh_per_token,4)}} mWh/token</td></tr>`;
-    rows += `<tr><td>LLM · Speed</td><td>${{fmt(inf.tokens_per_sec,1)}} tokens/sec</td></tr>`;
-    rows += `<tr><td>LLM · Mode</td><td>${{llmResult.warm ? '🌡 Warm' : '❄ Cold'}}</td></tr>`;
-  }} else {{
-    rows += `<tr><td>LLM</td><td style="color:#333">No result this session</td></tr>`;
-  }}
+  // LLM
+  try {{
+    if (llmResult && llmResult.mode === 'both') {{
+      const a = llmResult.analysis || {{}};
+      const ce = llmResult.cpu && llmResult.cpu.energy;
+      const ge = llmResult.gpu && llmResult.gpu.energy;
+      rows += `<tr><td>LLM · Model</td><td>${{llmResult.model_label || ''}}</td></tr>`;
+      rows += `<tr><td>LLM · CPU mWh/token</td><td>${{fmt(ce && ce.mwh_per_token,4)}} ${{a.mwh_winner==='CPU'?'✓':''}}</td></tr>`;
+      rows += `<tr><td>LLM · GPU mWh/token</td><td>${{fmt(ge && ge.mwh_per_token,4)}} ${{a.mwh_winner==='GPU'?'✓':''}}</td></tr>`;
+    }} else if (llmResult) {{
+      let e = llmResult.energy;
+      let inf = llmResult.inference;
+      if (!e && llmResult.runs && llmResult.runs.length) {{
+        e = llmResult.runs[llmResult.runs.length-1].energy;
+        inf = llmResult.runs[llmResult.runs.length-1].inference;
+      }}
+      if (!e && llmResult.summary) {{
+        e = {{ mwh_per_token: llmResult.summary.mwh_per_token_mean }};
+        inf = {{ tokens_per_sec: llmResult.summary.tokens_per_sec_mean }};
+      }}
+      rows += `<tr><td>LLM · Model</td><td>${{llmResult.model_label || ''}}</td></tr>`;
+      rows += `<tr><td>LLM · Energy / token</td><td>${{fmt(e && e.mwh_per_token,4)}} mWh/token</td></tr>`;
+      rows += `<tr><td>LLM · Speed</td><td>${{fmt(inf && inf.tokens_per_sec,1)}} tok/s</td></tr>`;
+    }} else {{
+      rows += `<tr><td>LLM</td><td style="color:#333">—</td></tr>`;
+    }}
+  }} catch(err) {{ rows += `<tr><td>LLM</td><td style="color:#555">error: ${{err.message}}</td></tr>`; }}
 
-  if (imageResult) {{
-    const e = imageResult.energy;
-    rows += `<tr><td>Image · Energy / image</td><td>${{fmt(e.delta_e_wh,4)}} Wh</td></tr>`;
-    rows += `<tr><td>Image · Generation time</td><td>${{fmt(imageResult.generation && imageResult.generation.total_s,1)}}s</td></tr>`;
-    rows += `<tr><td>Image · Confidence</td><td>${{e.confidence.flag}} ${{e.confidence.label}}</td></tr>`;
-  }} else {{
-    rows += `<tr><td>Image</td><td style="color:#333">No result this session</td></tr>`;
+  // Image
+  try {{
+    if (imageResult && imageResult.mode === 'both') {{
+      const a = imageResult.analysis || {{}};
+      const ce = imageResult.cpu && imageResult.cpu.energy;
+      const ge = imageResult.gpu && imageResult.gpu.energy;
+      const cg = imageResult.cpu && imageResult.cpu.generation;
+      const gg = imageResult.gpu && imageResult.gpu.generation;
+      rows += `<tr><td>Image · CPU Wh/image</td><td>${{fmt(ce && (ce.wh_per_image||ce.delta_e_wh),4)}} Wh ${{a.energy_winner==='cpu'?'✓':''}}</td></tr>`;
+      rows += `<tr><td>Image · GPU Wh/image</td><td>${{fmt(ge && (ge.wh_per_image||ge.delta_e_wh),4)}} Wh ${{a.energy_winner==='gpu'?'✓':''}}</td></tr>`;
+      rows += `<tr><td>Image · Time CPU/GPU</td><td>${{fmt(cg && cg.gen_s,1)}}s / ${{fmt(gg && (gg.gen_s_per_image||gg.gen_s),1)}}s</td></tr>`;
+    }} else if (imageResult) {{
+      const e = imageResult.energy;
+      const gen = imageResult.generation;
+      rows += `<tr><td>Image · Wh / image</td><td>${{fmt(e && (e.wh_per_image||e.delta_e_wh),4)}} Wh</td></tr>`;
+      rows += `<tr><td>Image · Generation time</td><td>${{fmt(gen && gen.total_s,1)}}s</td></tr>`;
+    }} else {{
+      rows += `<tr><td>Image</td><td style="color:#333">—</td></tr>`;
+    }}
+  }} catch(err) {{ rows += `<tr><td>Image</td><td style="color:#555">error: ${{err.message}}</td></tr>`; }}
+
+  }} catch(outerErr) {{
+    el.innerHTML = '<p style="color:#ff4400;font-family:monospace;font-size:0.82rem">Summary error: ' + outerErr + '</p>';
+    return;
   }}
 
   el.innerHTML = `
@@ -2506,6 +2576,7 @@ function buildSummary() {{
     </p>`;
 }}
 </script>
+    {_FOOTER}
 </body>
 </html>"""
 
@@ -2621,9 +2692,7 @@ async def image_page():
     </style>
 </head>
 <body>
-    <div style="position:absolute;top:1rem;left:1.5rem">{_LOGO}</div>
-    <div style="padding-top:3rem">
-    <a href="/" class="back">← back to dashboard</a>
+    {_BACK}
     {busy_banner}
     <h1>Image Generation Test</h1>
     <div class="subtitle">SD-Turbo · CPU {IMAGE_STEPS_CPU} steps / GPU {IMAGE_STEPS_GPU} steps × {GPU_BATCH_SIZE} images · 512×512</div>
@@ -2842,6 +2911,7 @@ function renderResult(r) {{
     </div>`;
 }}
 </script>
+    {_FOOTER}
 </body>
 </html>"""
 
@@ -2866,6 +2936,8 @@ async def image_start(prompt: str = Form(...), device: str = Form("cpu")):
             LOCK_FILE.unlink(missing_ok=True)
 
     position = enqueue(job_id, "image", label, coro)
+    if position is None:
+        return JSONResponse({"error": "Queue full — try again later."}, status_code=429)
     return {"job_id": job_id, "queue_position": position}
 
 
@@ -2900,7 +2972,7 @@ async def queue_page():
     </style>
 </head>
 <body>
-    <a href="/" class="back">← dashboard</a>
+    <a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Dashboard</a>
     <h1>Queue</h1>
     <div class="sub">Auto-refreshes every 4s</div>
     <div id="content"><p class="empty">Loading…</p></div>
@@ -2931,6 +3003,7 @@ async function load() {
 }
 load();
 </script>
+""" + _FOOTER + """
 </body>
 </html>"""
 
