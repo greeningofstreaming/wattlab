@@ -7,6 +7,73 @@ Scope: device layer only (GoS1). Network, CDN, and CPE explicitly excluded.
 
 ---
 
+## Session 8 — 2026-04-05
+
+### What we did
+
+**Peer review response · README · Confidence flags · Guided Tour polish · Password gate · Queue resume**
+
+#### External code audit (another AI)
+Received a structured review of the codebase. Agreed findings acted on this session:
+- Missing README (fixed)
+- Confidence flag description too buried (fixed — popover + Guided Tour step)
+- Guided Tour felt like a repackaged lab screen (fixed — three-band structure)
+- `confidence()` flag values flagged as potentially empty — confirmed clean (🟢/🟡/🔴 correct in all three modules), no fix needed
+
+Deferred (valid but not pre-demo priority): main.py refactor into routes/, Jinja templates, typed models, tests.
+
+#### README added
+- What WattLab measures and explicitly doesn't (network, CDN, training cost)
+- Hardware spec, key findings table, access instructions (public vs SSH tunnel)
+- Links to WATTLAB_SPEC.md and JOURNAL.md
+- How to run locally
+
+#### Guided Tour: three-band structure per step
+Each measurement step (Video, LLM, Image) restructured into three explicit bands:
+1. **What this shows** — the insight, 1–2 sentences
+2. **What we're doing** — concrete action + methodology in collapsible drawer
+3. **Result** — action button / result card + limitation note (scope + what the figure does not mean)
+Added `.band`, `.band-label`, `.limitation` CSS classes. Fixed step 3 which used undefined `.step-intro` / `.method-box` classes.
+
+#### Guided Tour: confidence flag step
+New step 4 "How We Flag Confidence" — explains P110 noise floor (~1W), the three-level system with thresholds, and why those specific values (5:1 SNR reasoning, batch mode as correct response to yellow/red). Findings promoted to step 5. Nav updated to 6 dots.
+
+#### Confidence flag popover on all result pages
+`_CONF_HELP_WIDGET` — a plain-string constant (not f-string) injected into video, LLM, image, and tour pages. Clicking any 🟢 🟡 🔴 badge opens a fixed popover with all three thresholds and ΔW definition. Event delegation so it works on dynamically rendered badges. `.conf-badge` gets `cursor:pointer` via injected `<style>` tag.
+
+#### Password gate
+Cookie-based gate for private preview period:
+- First visit → password form ("WattLab · Private preview")
+- Correct password → 30-day httponly cookie, full access
+- Password stored in `.env` as `WATTLAB_GATE_PASSWORD` (gitignored)
+- FastAPI middleware, exempts `/gate` paths only
+
+#### `_is_local()` security fix
+Previous check (`"greeningofstreaming.org" not in host`) allowed direct public IP access (e.g. phone over 5G to raw IP:8000) — treated as local. Replaced with IP-based check: uses `X-Real-IP` (set by nginx) when present, otherwise `request.client.host`. Returns True only if loopback or RFC-1918 private address.
+
+#### Navigation cleanup
+- `_BACK` renamed: "← Dashboard" → "← Home" across all pages
+- "← Lab mode" button removed from Guided Tour welcome step (redundant with ← Home)
+- "Lab mode" link removed from Guided Tour Findings step (same reason)
+
+#### Queue resume
+- `enqueue()` now stores `type` and `label` in `jobs` dict (previously lost when job was popped from `pending_queue` to start running)
+- `/queue` endpoint exposes `type` and `label` on running job
+- Queue page: "↩ Resume" link on each card → `/video?job=id`, `/llm?job=id`, `/image?job=id`
+- Video / LLM / Image pages: check `?job=` param on load, call existing poll function — handles in-progress and already-done cases without extra logic
+
+### Tags
+- `v1.0.0` — first public-ready commit (Session 7 + security fix)
+- `v1.1.0` — README + Guided Tour three-band + confidence popover (Session 8)
+
+### Deferred
+- DNS A record + SSL cert (after Easter, pending Wix admin access)
+- GPU image generation measurement figures (next clean run)
+- Image page elapsed time in progress bar
+- RAG experiment — prototype on MacBook first (corpus there, faster iteration), then port to GoS1 as new test type if energy trade-off is measurable
+
+---
+
 ## Session 7 — 2026-04-05
 
 ### What we did

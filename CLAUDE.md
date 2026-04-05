@@ -1,6 +1,6 @@
 # WattLab — Claude Code Context File
 # Auto-loaded by Claude Code. Keep this current.
-# Last updated: 2026-04-04
+# Last updated: 2026-04-05
 
 ## Project Identity
 - **Name:** WattLab
@@ -46,7 +46,7 @@ BouyguesBox (192.168.1.x)
 
 ## Environment
 - `.env` at `/home/gos/wattlab/.env` — gitignored
-- Variables: `TAPO_EMAIL`, `TAPO_PASSWORD`, `TAPO_P110_IP`
+- Variables: `TAPO_EMAIL`, `TAPO_PASSWORD`, `TAPO_P110_IP`, `WATTLAB_GATE_PASSWORD`
 
 ## Installed Packages
 - Python: tapo==0.8.12, python-dotenv, fastapi, uvicorn, python-multipart, torch 2.5.1+rocm6.2, diffusers, transformers, accelerate, pillow
@@ -60,6 +60,7 @@ BouyguesBox (192.168.1.x)
 wattlab/
 ├── .env                          # gitignored
 ├── .gitignore                    # includes test_content/, results/
+├── README.md
 ├── CLAUDE.md
 ├── JOURNAL.md
 ├── WATTLAB_SPEC.md               # full product spec
@@ -117,9 +118,12 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - Video: `http://192.168.1.62:8000/video`
 - LLM: `http://192.168.1.62:8000/llm`
 - Image: `http://192.168.1.62:8000/image`
-- Demo: `http://192.168.1.62:8000/demo`
+- Guided Tour: `http://192.168.1.62:8000/demo`
 - Settings: `http://192.168.1.62:8000/settings`
+- Queue: `http://192.168.1.62:8000/queue-status`
 - Tunnel: `ssh -p 2222 -L 8000:localhost:8000 user@gos1.duckdns.org`
+- Public (nginx, HTTP only until cert): `http://176.148.88.254` / `http://wattlab.greeningofstreaming.org` (DNS pending)
+- Gate password: in `.env` as `WATTLAB_GATE_PASSWORD` (ask owner)
 
 ## Prioritised Roadmap
 
@@ -154,19 +158,30 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] Prompt variation per run (random colour/mood modifier)
 - [x] GPU image generation — SD-Turbo via PyTorch ROCm, batch of 5 images, HSA_OVERRIDE_GFX_VERSION=11.0.0
 
-### Phase 6 — Public Access (session 5 partial)
-- [x] Block /settings from public URL (nginx 403 + FastAPI Host header check)
-- [x] nginx config written: `infra/wattlab.nginx.conf`
-- [x] Setup script written: `infra/setup-nginx.sh`
-- [ ] Run setup script on GoS1: `sudo bash infra/setup-nginx.sh`
-- [ ] BouyguesBox: forward TCP 80+443 → 192.168.1.62
-- [ ] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254`
+### Phase 6 — Public Access ✅ (partial — DNS/SSL pending)
+- [x] Block /settings from public URL — graceful read-only view (IP-based `_is_local()`)
+- [x] nginx config: `infra/wattlab.nginx.conf` — rate limiting, HTTP proxy, HTTPS block commented pending cert
+- [x] Setup script: `infra/setup-nginx.sh`
+- [x] nginx running on GoS1
+- [x] BouyguesBox: TCP 80+443 → 192.168.1.62
+- [x] Password gate: cookie-based, `WATTLAB_GATE_PASSWORD` in `.env`
+- [ ] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` (after Easter, Wix admin needed)
 - [ ] Let's Encrypt SSL: `sudo certbot --nginx -d wattlab.greeningofstreaming.org`
 - [ ] Enable HTTP→HTTPS redirect in nginx config, reload nginx
 
-### Deferred Polish
+### Phase 7 — Guided Tour & Credibility ✅
+- [x] Demo renamed to Guided Tour (`/demo` URL unchanged)
+- [x] Three-band structure per step (What this shows / What we're doing / Result)
+- [x] Confidence flag step in Guided Tour (step 4 of 5)
+- [x] Confidence flag popover on all result pages (click any 🟢🟡🔴 badge)
+- [x] README written
+- [x] Queue resume: ↩ Resume links on queue page, ?job= param on test pages
+- [x] Navigation: ← Home, Lab Mode button removed
+
+### Deferred
 - [ ] Image page progress bar: add elapsed time (video + LLM already have it)
 - [ ] GPU image generation: code complete, needs first test run to confirm + measure
+- [ ] RAG experiment: prototype on MacBook first (corpus there), port to GoS1 if trade-off measurable
 
 ## Key Findings to Date
 
