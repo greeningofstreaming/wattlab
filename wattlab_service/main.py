@@ -259,10 +259,21 @@ async def index():
         .watts {{ font-size: 6rem; color: #00ff99; font-weight: bold; }}
         .label {{ font-size: 1.2rem; color: #888; margin-top: 1rem; }}
         .scope {{ font-size: 0.8rem; color: #444; margin-top: 0.5rem; }}
-        .nav {{ margin-top: 3rem; display: flex; gap: 1.5rem; }}
-        .nav a {{ color: #00ff99; text-decoration: none;
-                  border: 1px solid #00ff99; padding: 0.5rem 1.5rem; }}
-        .nav a:hover {{ background: #00ff9922; }}
+        .nav {{ margin-top: 3rem; display: flex; flex-direction: column; align-items: center; gap: 1rem; width: 100%; max-width: 600px; }}
+        .nav-tour a {{ color: #0a0a0a; background: #00ff99; text-decoration: none;
+                       padding: 0.6rem 2.5rem; font-size: 1rem; font-weight: bold;
+                       display: inline-block; }}
+        .nav-tour a:hover {{ background: #00cc77; }}
+        .nav-primary {{ display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: center; }}
+        .nav-primary a {{ color: #00ff99; text-decoration: none;
+                          border: 1px solid #00ff99; padding: 0.5rem 1.25rem;
+                          font-size: 0.95rem; }}
+        .nav-primary a:hover {{ background: #00ff9922; }}
+        .nav-secondary {{ display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }}
+        .nav-secondary a {{ color: #666; text-decoration: none;
+                            border: 1px solid #333; padding: 0.35rem 0.9rem;
+                            font-size: 0.8rem; }}
+        .nav-secondary a:hover {{ color: #aaa; border-color: #555; }}
     </style>
 </head>
 <body>
@@ -270,13 +281,17 @@ async def index():
     <div class="label">GoS1 current power draw</div>
     <div class="scope">Device layer only · Tapo P110 · refreshes every 10s</div>
     <div class="nav">
-        <a href="/video">▶ Video transcode test</a>
-        <a href="/llm">▶ LLM inference test</a>
-        <a href="/image">▶ Image generation test</a>
-        <a href="/rag">▶ RAG energy test</a>
-        <a href="/demo">◆ Guided Tour</a>
-        <a href="/queue-status">⏱ Queue</a>
-        <a href="/settings">⚙ Settings</a>
+        <div class="nav-tour"><a href="/demo">◆ Guided Tour</a></div>
+        <div class="nav-primary">
+            <a href="/video">▶ Video transcode</a>
+            <a href="/image">▶ Image generation</a>
+            <a href="/llm">▶ LLM inference</a>
+        </div>
+        <div class="nav-secondary">
+            <a href="/rag">RAG energy test</a>
+            <a href="/queue-status">⏱ Queue</a>
+            <a href="/settings">⚙ Settings</a>
+        </div>
     </div>
     {_FOOTER}
 </body>
@@ -1802,6 +1817,11 @@ async def rag_page():
     }}
     selectRModel('tinyllama');
 
+    function toggleAns(id) {{
+        var el = document.getElementById(id);
+        if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }}
+
     // Index status
     async function loadIndexStatus() {{
         try {{
@@ -2090,7 +2110,7 @@ async def rag_page():
                 + '<span class="conf-badge">' + (conf.flag||'') + ' ' + (conf.label||'') + '</span>'
                 + '</div>'
                 + '<div style="font-size:0.75rem;color:#555;margin-bottom:0.4rem;cursor:pointer" '
-                + 'onclick="var el=document.getElementById(\'' + answerId + '\');el.style.display=el.style.display===\'none\'?\'block\':\'none\'">'
+                + 'data-id="' + answerId + '" onclick="toggleAns(this.dataset.id)">'
                 + '\u25b6 Show / hide answer</div>'
                 + '<div id="' + answerId + '" style="display:none;background:#111;padding:0.75rem;'
                 + 'font-size:0.78rem;color:#aaa;line-height:1.6;white-space:pre-wrap;max-height:300px;overflow-y:auto;'

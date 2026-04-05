@@ -7,6 +7,56 @@ Scope: device layer only (GoS1). Network, CDN, and CPE explicitly excluded.
 
 ---
 
+## Session 9 — 2026-04-06
+
+### What we did
+
+**RAG energy test · Compare 3 modes · Shared progress component · Home nav restructure**
+
+#### RAG energy test page (`/rag`)
+New test type measuring the energy cost of Retrieval-Augmented Generation vs plain LLM inference:
+- Three modes: **baseline** (cold LLM, no retrieval), **rag** (top_k=3 chunks), **rag_large** (top_k=8)
+- Backend: ChromaDB + `all-MiniLM-L6-v2` sentence-transformer embeddings (singletons, loaded once)
+- Corpus: PDF files from `settings.rag_corpus_path`, chunked at ~512 tokens with 64-token overlap
+- Index build: `/rag/build-index` endpoint + status polling; index persists in `.chroma/` across restarts
+- Same P110 measurement protocol as other tests (baseline → task → ΔW/ΔE/mWh/token)
+- New module `rag.py`, new `persist.py` branches for RAG result summary and CSV export
+- Supports TinyLlama, Mistral 7B, Phi-4 model selection
+
+#### RAG — Compare 3 modes
+**▶▶ Compare 3 modes** button runs baseline → rag → rag_large sequentially in one job:
+- Single baseline measurement shared across all three modes (unload + re-baseline between each)
+- Live progress: shows current mode, stage (baseline/inference), live wall power, elapsed time
+- Result: three side-by-side cards (or stacked on mobile) with energy, tokens/sec, confidence badge per mode
+- Answer text collapsible per card (toggle button); answers saved in result JSON for quality comparison
+- Backend: `run_rag_compare_job()` coroutine, `/rag/run-compare` endpoint
+
+#### Shared `_PROGRESS_JS` component
+Progress display factorized out of all 4 test pages into a single `_PROGRESS_JS` plain-string constant:
+- `wlRenderProgress({header, stagesHtml, watts, elapsed, extraHtml})` — renders 2.5rem live wall power, stage list, elapsed timer into `#status` div
+- `wlStageList(stages, currentStage)` — renders coloured pip list
+- `wlRenderQueued(position)` — renders queue position banner
+- `wlFormatElapsed(ms)` — formats elapsed time as `Ns` or `Nm Ns`
+- All 4 pages (video, LLM, image, RAG) inject `{_PROGRESS_JS}` and call shared functions
+
+#### Home nav restructure
+New three-tier layout (mobile-friendly, `flex-wrap` on all rows):
+1. **◆ Guided Tour** — solid green filled button, most prominent
+2. **Primary row** — Video · Image · LLM (outlined green, ordered by visual weight)
+3. **Secondary row** — RAG · Queue · Settings (muted grey, smaller text)
+
+#### Bug fixes
+- **RAG JS syntax error** (page unresponsive after first implementation): `\'` in Python triple-double-quoted f-strings outputs `'` not `\'`, causing `getElementById('' + answerId + '')` — adjacent JS string literals → SyntaxError. Fixed by using `data-id` attribute pattern (`data-id="..." onclick="toggleAns(this.dataset.id)"`) — no nested quote escaping needed.
+- **RAG Internal Server Error** (prior session): `{{}}` double-brace escaping used in plain Python functions (not f-strings) → `unhashable type: dict`. Fixed by removing double-braces from all endpoint functions.
+
+### Deferred
+- DNS A record + SSL cert (after Easter, pending Wix admin access)
+- GPU image generation: first clean measurement run still needed
+- Image page elapsed time in progress bar
+- phi4 (14B): `ollama pull phi4` (9.1GB) — for RAG quality comparison
+
+---
+
 ## Session 8 — 2026-04-05
 
 ### What we did

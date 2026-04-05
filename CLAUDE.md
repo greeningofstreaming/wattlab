@@ -1,6 +1,6 @@
 # WattLab — Claude Code Context File
 # Auto-loaded by Claude Code. Keep this current.
-# Last updated: 2026-04-05
+# Last updated: 2026-04-06
 
 ## Project Identity
 - **Name:** WattLab
@@ -178,10 +178,19 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] Queue resume: ↩ Resume links on queue page, ?job= param on test pages
 - [x] Navigation: ← Home, Lab Mode button removed
 
+### Phase 8 — RAG Energy Test ✅
+- [x] `/rag` page: baseline vs rag vs rag_large — energy, mWh/token, confidence
+- [x] ChromaDB index build/status endpoints; sentence-transformer embeddings (singletons)
+- [x] `rag.py` module, `persist.py` RAG branches (summary + CSV)
+- [x] **Compare 3 modes** button: sequential baseline→rag→rag_large, side-by-side result cards, answers saved
+- [x] Shared `_PROGRESS_JS`: `wlRenderProgress`, `wlStageList`, `wlRenderQueued`, `wlFormatElapsed` — injected into all 4 test pages
+- [x] Home nav restructured: Guided Tour prominent, primary (Video/Image/LLM), secondary (RAG/Queue/Settings)
+
 ### Deferred
+- [ ] DNS A record + SSL cert (after Easter, pending Wix admin access)
 - [ ] Image page progress bar: add elapsed time (video + LLM already have it)
-- [ ] GPU image generation: code complete, needs first test run to confirm + measure
-- [ ] RAG experiment: prototype on MacBook first (corpus there), port to GoS1 if trade-off measurable
+- [ ] GPU image generation: code complete, needs first clean measurement run
+- [ ] phi4 pull: `ollama pull phi4` (9.1GB) — enables 14B model in RAG compare
 
 ## Key Findings to Date
 

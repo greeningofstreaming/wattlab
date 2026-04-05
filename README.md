@@ -15,6 +15,7 @@ Built by [Greening of Streaming](https://greeningofstreaming.org), a French NGO 
 | Video transcode | Energy (Wh) and time for CPU vs GPU H.264/H.265/AV1 encode |
 | LLM inference | mWh per output token, tokens/sec — Mistral 7B and TinyLlama |
 | Image generation | Wh per image — SD-Turbo, CPU and GPU paths |
+| RAG energy test | Energy cost of retrieval-augmented generation vs plain LLM — baseline / rag / rag_large compared side-by-side |
 
 All figures are delta above idle baseline, sampled at 1-second intervals via a Tapo P110 smart plug on the mains supply.
 
