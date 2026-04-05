@@ -727,7 +727,7 @@ async def video_page():
 
     loadPrevRuns();
     const _resumeJob = new URLSearchParams(location.search).get('job');
-    if (_resumeJob) { pollJob(_resumeJob, 'both'); }
+    if (_resumeJob) {{ pollJob(_resumeJob, 'both'); }}
     </script>
     {_CONF_HELP_WIDGET}
     {_FOOTER}
@@ -1528,7 +1528,7 @@ async def llm_page():
 
     loadPrevRuns();
     const _resumeJob = new URLSearchParams(location.search).get('job');
-    if (_resumeJob) { pollLLM(_resumeJob); }
+    if (_resumeJob) {{ pollLLM(_resumeJob); }}
     </script>
     {_CONF_HELP_WIDGET}
     {_FOOTER}
