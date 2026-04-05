@@ -5,7 +5,7 @@ import json
 import uuid
 from pathlib import Path
 from fastapi import FastAPI, File, UploadFile, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from dotenv import dotenv_values
 from tapo import ApiClient
 from video import run_video_measurement, run_both_measurement, run_video_measurement_path, run_both_measurement_path, UPLOAD_DIR, LOCK_FILE
@@ -17,6 +17,63 @@ import settings as cfg
 
 config = dotenv_values("/home/gos/wattlab/.env")
 app = FastAPI()
+
+GATE_PASSWORD = config.get("WATTLAB_GATE_PASSWORD", "")
+
+@app.middleware("http")
+async def gate_middleware(request: Request, call_next):
+    if not GATE_PASSWORD or request.url.path.startswith("/gate"):
+        return await call_next(request)
+    if request.cookies.get("wl_auth") == GATE_PASSWORD:
+        return await call_next(request)
+    next_url = request.url.path
+    return RedirectResponse(url=f"/gate?next={next_url}", status_code=302)
+
+@app.get("/gate", response_class=HTMLResponse)
+async def gate_page(next: str = "/", error: bool = False):
+    err_html = ('<p style="color:#ff4400;font-family:monospace;font-size:0.85rem;'
+                'margin-bottom:1rem">Incorrect password.</p>') if error else ''
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+  <title>WattLab</title>
+  <style>
+    *{{box-sizing:border-box;margin:0;padding:0}}
+    body{{font-family:monospace;background:#0a0a0a;color:#e0e0e0;
+         display:flex;flex-direction:column;align-items:center;
+         justify-content:center;height:100vh;gap:0}}
+    h1{{color:#00ff99;font-size:1.4rem;margin-bottom:0.25rem}}
+    p.sub{{color:#444;font-size:0.8rem;margin-bottom:2rem}}
+    input{{background:#111;border:1px solid #333;color:#e0e0e0;
+           font-family:monospace;font-size:1rem;padding:0.6rem 1rem;
+           width:200px;text-align:center;letter-spacing:0.1em}}
+    input:focus{{border-color:#00ff99;outline:none}}
+    button{{background:#00ff99;color:#000;border:none;
+            font-family:monospace;font-size:1rem;padding:0.6rem 2rem;
+            cursor:pointer;margin-top:0.75rem}}
+    button:hover{{background:#00dd88}}
+    form{{display:flex;flex-direction:column;align-items:center;gap:0}}
+  </style>
+</head>
+<body>
+  <h1>WattLab</h1>
+  <p class="sub">Greening of Streaming · Private preview</p>
+  {err_html}
+  <form method="post" action="/gate">
+    <input type="hidden" name="next" value="{next}">
+    <input type="password" name="password" placeholder="password" autofocus>
+    <button type="submit">Enter</button>
+  </form>
+</body>
+</html>"""
+
+@app.post("/gate")
+async def gate_submit(request: Request, password: str = Form(...), next: str = Form("/")):
+    if password == GATE_PASSWORD:
+        response = RedirectResponse(url=next, status_code=302)
+        response.set_cookie("wl_auth", GATE_PASSWORD, max_age=30*24*3600, httponly=True)
+        return response
+    return RedirectResponse(url=f"/gate?next={next}&error=1", status_code=302)
 jobs = {}
 
 # --- Queue ---
