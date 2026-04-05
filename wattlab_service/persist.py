@@ -135,6 +135,15 @@ def _summarise(job_type: str, data: dict) -> dict:
             summary["tokens_per_sec"] = i.get("tokens_per_sec")
             summary["confidence"] = e.get("confidence", {}).get("flag")
             return summary
+        elif mode == "rag_compare":
+            summary["task"] = "RAG compare (3 modes)"
+            rl = data.get("results", {}).get("rag_large", {})
+            e = rl.get("energy", {})
+            i = rl.get("inference", {})
+            summary["mwh_per_token"] = e.get("mwh_per_token")
+            summary["tokens_per_sec"] = i.get("tokens_per_sec")
+            summary["confidence"] = e.get("confidence", {}).get("flag")
+            return summary
         elif mode == "all":
             summary["task"] = "T1+T2+T3"
             t3 = data.get("tasks", {}).get("T3", {})
@@ -274,6 +283,14 @@ def _llm_rows(data: dict) -> list:
         t = data.get("thermals", {})
         label = f"RAG/{data.get('rag_mode','')} — {data.get('question','')[:50]}"
         return [_row(label, i, e, t)]
+    elif mode == "rag_compare":
+        rows = []
+        for m, res in data.get("results", {}).items():
+            e = res.get("energy", {})
+            i = res.get("inference", {})
+            t = res.get("thermals", {})
+            rows.append(_row(f"RAG/{m} — {data.get('question','')[:40]}", i, e, t))
+        return rows
     elif mode == "batch":
         rows = []
         t = data.get("thermals", {})

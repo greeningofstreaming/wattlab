@@ -180,6 +180,53 @@ _CONF_HELP_WIDGET = (
     '})();</script>'
 )
 
+# Shared progress utilities — injected into every test page.
+# Plain string (not f-string): JS braces are single, no escaping needed.
+_PROGRESS_JS = """<script>
+function wlFmt(v, dec) { if (v === null || v === undefined) return '\u2014'; return Number(v).toFixed(dec ?? 2); }
+function wlFormatElapsed(ms) {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return s + 's';
+    return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+}
+function wlStageList(stages, cur) {
+    return stages.map(function(lbl, i) {
+        var s = i < cur ? 'done' : i === cur ? 'active' : 'pending';
+        var ic = s === 'done' ? '✓' : s === 'active' ? '▶' : '·';
+        var col = s === 'done' ? '#00ff99' : s === 'active' ? '#ffaa00' : '#333';
+        return '<div style="display:flex;align-items:center;gap:0.6rem;font-size:0.82rem;margin-bottom:0.3rem">'
+             + '<span style="color:' + col + ';width:1rem">' + ic + '</span>'
+             + '<span style="color:' + col + '">' + lbl + '</span></div>';
+    }).join('');
+}
+function wlRenderProgress(opts) {
+    var w = opts.watts;
+    var wHtml = w != null
+        ? '<div style="font-size:2.5rem;color:#00ff99;font-family:monospace;font-weight:bold;margin:0.75rem 0 0">'
+          + w.toFixed(1) + ' W</div>'
+          + '<div style="color:#555;font-size:0.72rem;letter-spacing:0.04em;margin-bottom:0.5rem">live wall power \xb7 Tapo P110</div>'
+        : '';
+    var elHtml = opts.elapsed != null
+        ? '<div style="color:#444;font-size:0.78rem;margin-top:0.4rem">Elapsed: ' + wlFormatElapsed(opts.elapsed) + '</div>'
+        : '';
+    document.getElementById('status').innerHTML =
+        '<div style="border:1px solid #222;padding:1.5rem">'
+        + '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">'
+        + (opts.header || 'Measuring \u2014 do not close this tab') + '</div>'
+        + (opts.stagesHtml || '')
+        + wHtml + elHtml
+        + (opts.extraHtml || '')
+        + '</div>';
+}
+function wlRenderQueued(pos) {
+    document.getElementById('status').innerHTML =
+        '<div style="border:1px solid #333;padding:1.5rem">'
+        + '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">\u23f1 Queued \u2014 position ' + pos + '</div>'
+        + '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>'
+        + '</div>';
+}
+</script>"""
+
 # --- P110 ---
 
 async def get_power_watts() -> float:
@@ -462,45 +509,17 @@ async def video_page():
         if (el) el.classList.add('selected');
     }}
 
-    function formatElapsed(ms) {{
-        const s = Math.floor(ms / 1000);
-        const m = Math.floor(s / 60);
-        return m > 0 ? `${{m}}m ${{s % 60}}s` : `${{s}}s`;
-    }}
-
     function renderProgress(jobId, mode, serverStage, watts) {{
         const stages = STAGES[mode];
-
         const stageMap = STAGE_MAP[mode];
-        const currentStage = stageMap[serverStage] !== undefined
-            ? stageMap[serverStage] : 0;
-
-        const stageHTML = stages.map((label, i) => {{
-            let state = i < currentStage ? 'done' : i === currentStage ? 'active' : 'pending';
-            let icon = state === 'done' ? '✓' : state === 'active' ? '▶' : '·';
-            let iconColor = state === 'done' ? '#00ff99' : state === 'active' ? '#ffaa00' : '#333';
-            return `<div class="stage ${{state}}">
-                <span class="stage-icon" style="color:${{iconColor}}">${{icon}}</span>
-                <span class="stage-label">${{label}}</span>
-            </div>`;
-        }}).join('');
-
-        const elapsed = Date.now() - startTime;
-        const wattsHtml = watts != null
-            ? `<div style="font-size:1.8rem;color:#00ff99;font-family:monospace;margin:0.75rem 0 0.2rem">${{watts.toFixed(1)}} W</div>
-               <div style="color:#444;font-size:0.72rem;margin-bottom:0.25rem">live wall power</div>`
-            : '';
-        document.getElementById('status').innerHTML = `
-            <div class="progress-box">
-                <div class="progress-header">Running measurement — do not close this tab</div>
-                <div class="stages">${{stageHTML}}</div>
-                ${{wattsHtml}}
-                <div class="progress-footer">
-                    <span>Job: ${{jobId}}</span>
-                    <span class="elapsed">Elapsed: ${{formatElapsed(elapsed)}}</span>
-                    <span>polling every 5s · zero load on GoS1</span>
-                </div>
-            </div>`;
+        const currentStage = stageMap[serverStage] !== undefined ? stageMap[serverStage] : 0;
+        wlRenderProgress({{
+            header: 'Running measurement \u2014 do not close this tab',
+            stagesHtml: wlStageList(stages, currentStage),
+            watts: watts,
+            elapsed: startTime ? Date.now() - startTime : null,
+            extraHtml: '<div style="color:#333;font-size:0.72rem;margin-top:0.4rem">Job: ' + jobId + ' \xb7 polling every 5s</div>',
+        }});
     }}
 
     function stopProgress() {{
@@ -575,13 +594,7 @@ async def video_page():
         }}
     }}
 
-    function renderQueued(position) {{
-        document.getElementById('status').innerHTML =
-            '<div style="border:1px solid #333;padding:1.5rem">' +
-            '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">⏱ Queued — position ' + position + '</div>' +
-            '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>' +
-            '</div>';
-    }}
+    function renderQueued(position) {{ wlRenderQueued(position); }}
 
     function metricRow(label, val, unit='') {{
         return `<div class="metric"><span>${{label}}</span>
@@ -674,7 +687,7 @@ async def video_page():
 
     function renderResult(r, jobId) {{
         const el = document.getElementById('status');
-        const elapsed = startTime ? formatElapsed(Date.now() - startTime) : '';
+        const elapsed = startTime ? wlFormatElapsed(Date.now() - startTime) : '';
         const elapsedNote = elapsed ? `<div style="color:#444;font-size:0.78rem;margin-bottom:1rem">
             Total elapsed: ${{elapsed}}</div>` : '';
         const links = jobId ? downloadLinks(jobId) : '';
@@ -733,6 +746,7 @@ async def video_page():
     const _resumeJob = new URLSearchParams(location.search).get('job');
     if (_resumeJob) {{ pollJob(_resumeJob, 'both'); }}
     </script>
+    {_PROGRESS_JS}
     {_CONF_HELP_WIDGET}
     {_FOOTER}
 </body>
@@ -1039,14 +1053,7 @@ async def llm_page():
         document.getElementById('promptText').value = defaultPrompts[selectedTask] || '';
     }}
 
-    function formatElapsed(ms) {{
-        const s = Math.floor(ms / 1000);
-        const m = Math.floor(s / 60);
-        return m > 0 ? m + 'm ' + (s%60) + 's' : s + 's';
-    }}
-
     function renderProgress(stage, watts) {{
-        // Normalise batch/both stages for display
         const isBoth = stage.startsWith('baseline_cpu') || stage.startsWith('cpu_') ||
                        stage.startsWith('baseline_gpu') || stage.startsWith('gpu_') ||
                        stage === 'cooldown';
@@ -1055,7 +1062,7 @@ async def llm_page():
                              stage.startsWith('cpu_inference') ? 'cpu_inference' :
                              stage.startsWith('gpu_inference') ? 'gpu_inference' : stage;
         const stageLabel = stage.startsWith('inference_') ? 'Running inference (' + stage.replace('inference_','').replace('_',' ') + ')' :
-                           stage.startsWith('rest_') ? 'Resting between runs…' : null;
+                           stage.startsWith('rest_') ? 'Resting between runs\u2026' : null;
         const stages = isBoth ? [
             ['baseline_cpu', 'Measuring CPU baseline'],
             ['cpu_inference', 'CPU inference (num_gpu=0)'],
@@ -1066,37 +1073,20 @@ async def llm_page():
         ] : [
             ['baseline', 'Measuring baseline'],
             ['inference', stageLabel || 'Running inference'],
-            ['rest', 'Resting between runs…'],
+            ['rest', 'Resting between runs\u2026'],
             ['done', 'Done'],
         ].filter(([k]) => k !== 'rest' || displayStage === 'rest');
-        const stageHTML = stages.map(([key, label]) => {{
-            const state = displayStage === key ? 'active' :
-                stages.findIndex(s=>s[0]===key) < stages.findIndex(s=>s[0]===displayStage) ? 'done' : 'pending';
-            const icon = state === 'done' ? '✓' : state === 'active' ? '▶' : '·';
-            const color = state === 'done' ? '#00ff99' : state === 'active' ? '#ffaa00' : '#333';
-            return `<div class="stage ${{state}}">
-                <span style="color:${{color}};width:1.2rem">${{icon}}</span>
-                <span class="stage-label">${{label}}</span>
-            </div>`;
-        }}).join('');
-        const elapsed = startTime ? formatElapsed(Date.now() - startTime) : '0s';
-        const wattsHtml = watts != null
-            ? `<div style="font-size:1.8rem;color:#00ff99;font-family:monospace;margin-top:0.75rem">${{watts.toFixed(1)}} W</div>
-               <div style="color:#444;font-size:0.72rem;margin-bottom:0.5rem">live wall power</div>`
-            : '';
-        document.getElementById('status').innerHTML = `
-            <div class="progress-box">
-                <div class="progress-header">Running — do not close this tab</div>
-                ${{stageHTML}}
-                ${{wattsHtml}}
-                <div style="color:#444;font-size:0.78rem;margin-top:0.5rem">
-                    Elapsed: ${{elapsed}}
-                </div>
-                <div id="stream-preview" style="margin-top:0.75rem;background:#111;
-                    padding:0.75rem;font-size:0.78rem;color:#888;line-height:1.6;
-                    min-height:2rem;border-left:2px solid #00ff9933;max-height:120px;
-                    overflow-y:auto;white-space:pre-wrap"></div>
-            </div>`;
+        const stageIdx = stages.findIndex(([k]) => k === displayStage);
+        wlRenderProgress({{
+            header: 'Running \u2014 do not close this tab',
+            stagesHtml: wlStageList(stages.map(([k,l]) => l), stageIdx < 0 ? 0 : stageIdx),
+            watts: watts,
+            elapsed: startTime ? Date.now() - startTime : null,
+            extraHtml: '<div id="stream-preview" style="margin-top:0.75rem;background:#111;'
+                + 'padding:0.75rem;font-size:0.78rem;color:#888;line-height:1.6;'
+                + 'min-height:2rem;border-left:2px solid #00ff9933;max-height:120px;'
+                + 'overflow-y:auto;white-space:pre-wrap"></div>',
+        }});
     }}
 
     async function runInference() {{
@@ -1149,11 +1139,7 @@ async def llm_page():
                     '<div style="color:#ff4400">Error: ' + data.error + '</div>';
                 document.getElementById('runBtn').disabled = false;
             }} else if (data.stage === 'queued') {{
-                document.getElementById('status').innerHTML =
-                    '<div style="border:1px solid #333;padding:1.5rem">' +
-                    '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">⏱ Queued — position ' + data.queue_position + '</div>' +
-                    '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>' +
-                    '</div>';
+                wlRenderQueued(data.queue_position);
                 streamTimer = setTimeout(() => pollLLM(jobId), 3000);
             }} else {{
                 const stage = data.stage || 'baseline';
@@ -1171,7 +1157,7 @@ async def llm_page():
     }}
 
     function renderLLMResult(r, jobId) {{
-        const elapsed = startTime ? formatElapsed(Date.now() - startTime) : '';
+        const elapsed = startTime ? wlFormatElapsed(Date.now() - startTime) : '';
         const base = '/results/llm/' + jobId;
         const links = jobId ? `<div style="margin-top:1rem;display:flex;gap:0.75rem">
             <a href="${{base}}/download.json" download
@@ -1455,38 +1441,26 @@ async def llm_page():
                 document.getElementById('runBtn').disabled = false;
                 document.getElementById('runAllBtn').disabled = false;
             }} else if (data.stage === 'queued') {{
-                document.getElementById('status').innerHTML =
-                    '<div style="border:1px solid #333;padding:1.5rem">' +
-                    '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">⏱ Queued — position ' + data.queue_position + '</div>' +
-                    '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>' +
-                    '</div>';
+                wlRenderQueued(data.queue_position);
                 streamTimer = setTimeout(() => pollLLMAll(jobId), 3000);
             }} else {{
                 const task = data.current_task || 'T1';
                 const dev = data.current_device || '';
-                const stage = data.stage || 'baseline';
                 const taskNums = {{'T1':1,'T2':2,'T3':3}};
                 const taskNum = taskNums[task] || 1;
-                const wattsHtml = watts != null
-                    ? `<div style="font-size:1.8rem;color:#00ff99;font-family:monospace;margin:0.75rem 0 0.2rem">${{watts.toFixed(1)}} W</div>
-                       <div style="color:#444;font-size:0.72rem;margin-bottom:0.5rem">live wall power</div>`
-                    : '';
-                const devBadge = dev ? `<span style="color:#555;font-size:0.72rem;margin-left:0.5rem">(${{dev.toUpperCase()}})</span>` : '';
+                const devBadge = dev ? ' (' + dev.toUpperCase() + ')' : '';
                 const taskPips = ['T1','T2','T3'].map(k => {{
                     const s = k === task ? 'active' : taskNums[k] < taskNum ? 'done' : 'pending';
                     const color = s === 'done' ? '#00ff99' : s === 'active' ? '#ffaa00' : '#333';
-                    return `<span style="border:1px solid ${{color}};padding:0.2rem 0.5rem;font-size:0.78rem;color:${{color}}">${{k}}</span>`;
+                    return '<span style="border:1px solid ' + color + ';padding:0.2rem 0.5rem;font-size:0.78rem;color:' + color + '">' + k + '</span>';
                 }}).join('');
-                document.getElementById('status').innerHTML = `
-                    <div class="progress-box">
-                        <div class="progress-header">Running All Tasks — do not close this tab</div>
-                        <div style="color:#888;font-size:0.82rem;margin-bottom:0.5rem">
-                            ${{task}}${{devBadge}} · ${{stage}}
-                        </div>
-                        <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">${{taskPips}}</div>
-                        ${{wattsHtml}}
-                        <div style="color:#444;font-size:0.78rem">Elapsed: ${{startTime ? formatElapsed(Date.now()-startTime) : '0s'}}</div>
-                    </div>`;
+                wlRenderProgress({{
+                    header: 'Running All Tasks \u2014 do not close this tab',
+                    stagesHtml: '<div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">' + taskPips + '</div>'
+                        + '<div style="color:#888;font-size:0.8rem;margin-bottom:0.25rem">' + task + devBadge + '</div>',
+                    watts: watts,
+                    elapsed: startTime ? Date.now() - startTime : null,
+                }});
                 streamTimer = setTimeout(() => pollLLMAll(jobId), 3000);
             }}
         }} catch(e) {{
@@ -1534,6 +1508,7 @@ async def llm_page():
     const _resumeJob = new URLSearchParams(location.search).get('job');
     if (_resumeJob) {{ pollLLM(_resumeJob); }}
     </script>
+    {_PROGRESS_JS}
     {_CONF_HELP_WIDGET}
     {_FOOTER}
 </body>
@@ -1794,7 +1769,13 @@ async def rag_page():
               placeholder="e.g. What is the energy cost of video streaming per GB transferred?"
               style="margin-bottom:1.5rem"></textarea>
 
-    <button id="runBtn" onclick="startRag()">▶ Run measurement</button>
+    <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
+        <button id="runBtn" onclick="startRag()">▶ Run single</button>
+        <button id="compareBtn" onclick="startCompare()"
+                style="background:#111;border:1px solid #00ff99;color:#00ff99">
+            ▶▶ Compare 3 modes
+        </button>
+    </div>
 
     <div id="status"></div>
 
@@ -1805,6 +1786,7 @@ async def rag_page():
     let selectedRMode = 'baseline';
     let ragTimer = null;
     let ragStartTime = null;
+    let compareTimer = null;
 
     function selectRModel(k) {{
         document.querySelectorAll('.presets .preset').forEach(el => el.classList.remove('selected'));
@@ -1864,12 +1846,6 @@ async def rag_page():
         setTimeout(loadIndexStatus, 2000);
     }}
 
-    function formatElapsed(ms) {{
-        const s = Math.floor(ms / 1000);
-        if (s < 60) return s + 's';
-        return Math.floor(s/60) + 'm ' + (s%60) + 's';
-    }}
-
     async function startRag() {{
         const question = document.getElementById('questionText').value.trim();
         if (!question) {{
@@ -1901,35 +1877,26 @@ async def rag_page():
         }}
     }}
 
-    function renderRagProgress(stage) {{
-        const stages = [
-            {{id:'baseline', label:'Baseline poll (10s)'}},
-            {{id:'inference', label:'Inference running'}},
-            {{id:'done',      label:'Complete'}},
-        ];
-        const stageOrder = stages.map(s => s.id);
-        const cur = stageOrder.indexOf(stage);
-        const stagesHtml = stages.map((s, i) => {{
-            const cls = i < cur ? 'done' : i === cur ? 'active' : 'pending';
-            const icon = cls === 'done' ? '✓' : cls === 'active' ? '●' : '○';
-            const col  = cls === 'done' ? '#00ff99' : cls === 'active' ? '#ffaa00' : '#333';
-            return `<div style="display:flex;align-items:center;gap:0.6rem;font-size:0.82rem;margin-bottom:0.3rem">
-                <span style="color:${{col}}">${{icon}}</span>
-                <span style="color:${{col}}">${{s.label}}</span></div>`;
-        }}).join('');
-        document.getElementById('status').innerHTML = `
-            <div class="progress-box">
-                <div class="progress-header">Measuring RAG energy — do not close this tab</div>
-                ${{stagesHtml}}
-                <div style="color:#444;font-size:0.78rem;margin-top:0.75rem">
-                    Elapsed: ${{ragStartTime ? formatElapsed(Date.now()-ragStartTime) : '0s'}}</div>
-            </div>`;
+    const RAG_STAGES = ['Baseline poll (10s)', 'Inference running', 'Complete'];
+    const RAG_STAGE_IDX = {{baseline:0, inference:1, done:2}};
+
+    function renderRagProgress(stage, watts) {{
+        wlRenderProgress({{
+            header: 'Measuring RAG energy \u2014 do not close this tab',
+            stagesHtml: wlStageList(RAG_STAGES, RAG_STAGE_IDX[stage] ?? 0),
+            watts: watts,
+            elapsed: ragStartTime ? Date.now() - ragStartTime : null,
+        }});
     }}
 
     async function pollRag(jobId) {{
         try {{
-            const resp = await fetch('/rag/job/' + jobId);
+            const [resp, powerR] = await Promise.all([
+                fetch('/rag/job/' + jobId),
+                fetch('/power').catch(() => null),
+            ]);
             const data = await resp.json();
+            const watts = powerR ? (await powerR.json().catch(()=>({{}}))).watts ?? null : null;
             if (data.stage === 'done' && data.result) {{
                 if (ragTimer) {{ clearTimeout(ragTimer); ragTimer = null; }}
                 renderRagResult(data.result, jobId);
@@ -1941,14 +1908,10 @@ async def rag_page():
                     '<div style="color:#ff4400">Error: ' + (data.error||'unknown') + '</div>';
                 document.getElementById('runBtn').disabled = false;
             }} else if (data.stage === 'queued') {{
-                document.getElementById('status').innerHTML =
-                    '<div style="border:1px solid #333;padding:1.5rem">' +
-                    '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">⏱ Queued — position ' + data.queue_position + '</div>' +
-                    '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>' +
-                    '</div>';
+                wlRenderQueued(data.queue_position);
                 ragTimer = setTimeout(() => pollRag(jobId), 3000);
             }} else {{
-                renderRagProgress(data.stage || 'baseline');
+                renderRagProgress(data.stage || 'baseline', watts);
                 ragTimer = setTimeout(() => pollRag(jobId), 2000);
             }}
         }} catch(e) {{
@@ -2004,12 +1967,154 @@ async def rag_page():
             </div>`;
     }}
 
+    // --- Compare 3 modes ---
+
+    async function startCompare() {{
+        const question = document.getElementById('questionText').value.trim();
+        if (!question) {{
+            document.getElementById('status').innerHTML =
+                '<div style="color:#ff4400;font-size:0.85rem;margin-top:1rem">Please enter a question.</div>';
+            return;
+        }}
+        document.getElementById('runBtn').disabled = true;
+        document.getElementById('compareBtn').disabled = true;
+        ragStartTime = Date.now();
+        const form = new FormData();
+        form.append('model_key', selectedRModel);
+        form.append('question', question);
+        try {{
+            const resp = await fetch('/rag/run-compare', {{method:'POST', body:form}});
+            const data = await resp.json();
+            if (data.job_id) {{
+                renderCompareProgress({{}}, null, null);
+                pollCompare(data.job_id);
+            }} else {{
+                document.getElementById('status').innerHTML =
+                    '<div style="color:#ff4400">Error: ' + JSON.stringify(data) + '</div>';
+                document.getElementById('runBtn').disabled = false;
+                document.getElementById('compareBtn').disabled = false;
+            }}
+        }} catch(e) {{
+            document.getElementById('status').innerHTML =
+                '<div style="color:#ff4400">Failed: ' + e + '</div>';
+            document.getElementById('runBtn').disabled = false;
+            document.getElementById('compareBtn').disabled = false;
+        }}
+    }}
+
+    function renderCompareProgress(partial, currentMode, watts) {{
+        const MODES = ['baseline','rag','rag_large'];
+        const MODE_LABELS = {{baseline:'Baseline', rag:'RAG', rag_large:'RAG Large'}};
+        const stagesHtml = MODES.map(m => {{
+            const done = partial && partial[m];
+            const active = m === currentMode && !done;
+            const col = done ? '#00ff99' : active ? '#ffaa00' : '#333';
+            const icon = done ? '✓' : active ? '▶' : '·';
+            let extra = '';
+            if (done) {{
+                const e = partial[m].energy || {{}};
+                extra = ' <span style="color:#555;font-size:0.75rem">\u2014 '
+                    + (e.delta_w != null ? e.delta_w + ' W \xb7 ' : '')
+                    + (e.mwh_per_token != null ? e.mwh_per_token + ' mWh/tok' : '')
+                    + (e.confidence ? ' ' + e.confidence.flag : '')
+                    + '</span>';
+            }}
+            return '<div style="display:flex;align-items:center;gap:0.6rem;font-size:0.82rem;margin-bottom:0.3rem">'
+                + '<span style="color:' + col + ';width:1rem">' + icon + '</span>'
+                + '<span style="color:' + col + '">' + MODE_LABELS[m] + extra + '</span></div>';
+        }}).join('');
+        wlRenderProgress({{
+            header: 'Comparing 3 modes \u2014 do not close this tab',
+            stagesHtml: stagesHtml,
+            watts: watts,
+            elapsed: ragStartTime ? Date.now() - ragStartTime : null,
+        }});
+    }}
+
+    async function pollCompare(jobId) {{
+        try {{
+            const [resp, powerR] = await Promise.all([
+                fetch('/rag/job/' + jobId),
+                fetch('/power').catch(() => null),
+            ]);
+            const data = await resp.json();
+            const watts = powerR ? (await powerR.json().catch(()=>({{}}))).watts ?? null : null;
+            if (data.stage === 'done' && data.result) {{
+                if (compareTimer) {{ clearTimeout(compareTimer); compareTimer = null; }}
+                renderCompareResult(data.result, jobId);
+                document.getElementById('runBtn').disabled = false;
+                document.getElementById('compareBtn').disabled = false;
+                loadPrevRuns();
+            }} else if (data.stage === 'error' || data.error) {{
+                if (compareTimer) {{ clearTimeout(compareTimer); compareTimer = null; }}
+                document.getElementById('status').innerHTML =
+                    '<div style="color:#ff4400">Error: ' + (data.error||'unknown') + '</div>';
+                document.getElementById('runBtn').disabled = false;
+                document.getElementById('compareBtn').disabled = false;
+            }} else if (data.stage === 'queued') {{
+                wlRenderQueued(data.queue_position);
+                compareTimer = setTimeout(() => pollCompare(jobId), 3000);
+            }} else {{
+                renderCompareProgress(data.partial_results || {{}}, data.current_mode || data.stage, watts);
+                compareTimer = setTimeout(() => pollCompare(jobId), 2000);
+            }}
+        }} catch(e) {{
+            compareTimer = setTimeout(() => pollCompare(jobId), 5000);
+        }}
+    }}
+
+    function renderCompareResult(r, jobId) {{
+        const MODES = ['baseline','rag','rag_large'];
+        const MODE_LABELS = {{baseline:'Baseline (no retrieval)', rag:'RAG \u2014 top 3 chunks', rag_large:'RAG Large \u2014 top 8 chunks'}};
+        const STRIPE = {{baseline:'#444', rag:'#0088cc', rag_large:'#00ff99'}};
+        const cards = MODES.map(m => {{
+            const res = (r.results || {{}})[m];
+            if (!res) return '';
+            const e = res.energy || {{}};
+            const inf = res.inference || {{}};
+            const conf = e.confidence || {{}};
+            const retrievalRow = m !== 'baseline'
+                ? '<div style="color:#555;font-size:0.78rem;margin:0.4rem 0">'
+                  + 'embed ' + res.embedding_ms + 'ms \xb7 search ' + res.retrieval_ms + 'ms \xb7 '
+                  + res.chunks_retrieved + ' chunks</div>'
+                : '<div style="color:#333;font-size:0.78rem;margin:0.4rem 0">No retrieval</div>';
+            const answerId = 'ans-' + m + '-' + jobId;
+            return '<div style="border:1px solid #222;border-left:3px solid ' + STRIPE[m] + ';padding:1.25rem;margin-bottom:0.75rem">'
+                + '<div style="font-size:0.9rem;color:#e0e0e0;margin-bottom:0.5rem">' + MODE_LABELS[m] + '</div>'
+                + retrievalRow
+                + '<div style="display:flex;gap:1.5rem;font-size:0.82rem;flex-wrap:wrap;margin-bottom:0.5rem">'
+                + '<span>\u0394W <span style="color:#00ff99">' + e.delta_w + ' W</span></span>'
+                + '<span>\u0394E <span style="color:#00ff99">' + e.delta_e_wh + ' Wh</span></span>'
+                + '<span>mWh/tok <span style="color:#00ff99">' + (e.mwh_per_token ?? '\u2014') + '</span></span>'
+                + '<span>' + inf.tokens_per_sec + ' tok/s</span>'
+                + '<span class="conf-badge">' + (conf.flag||'') + ' ' + (conf.label||'') + '</span>'
+                + '</div>'
+                + '<div style="font-size:0.75rem;color:#555;margin-bottom:0.4rem;cursor:pointer" '
+                + 'onclick="var el=document.getElementById(\'' + answerId + '\');el.style.display=el.style.display===\'none\'?\'block\':\'none\'">'
+                + '\u25b6 Show / hide answer</div>'
+                + '<div id="' + answerId + '" style="display:none;background:#111;padding:0.75rem;'
+                + 'font-size:0.78rem;color:#aaa;line-height:1.6;white-space:pre-wrap;max-height:300px;overflow-y:auto;'
+                + 'border-left:2px solid ' + STRIPE[m] + '44">' + (inf.response || '') + '</div>'
+                + '</div>';
+        }}).join('');
+        document.getElementById('status').innerHTML =
+            '<div style="border:1px solid #222;padding:1.5rem">'
+            + '<div style="color:#00ff99;font-size:1.1rem;margin-bottom:0.25rem">Comparison \u2014 ' + r.model_label + '</div>'
+            + '<div style="color:#555;font-size:0.82rem;margin-bottom:1rem">' + r.question + '</div>'
+            + cards
+            + '<div style="color:#333;font-size:0.72rem;margin-top:0.75rem">' + (r.scope||'') + '</div>'
+            + '<div style="display:flex;gap:0.5rem;margin-top:0.75rem">'
+            + '<a href="/results/llm/' + jobId + '/download.json" download style="color:#555;font-size:0.75rem;text-decoration:none">\u2193 JSON</a>'
+            + '</div></div>';
+    }}
+
+    // --- Previous runs ---
+
     async function loadPrevRuns() {{
         try {{
             const resp = await fetch('/results/llm/list');
             const runs = await resp.json();
-            // Filter to RAG runs only
-            const ragRuns = runs.filter(r => r.task && r.task.startsWith('RAG/'));
+            const ragRuns = runs.filter(r => r.task && (r.task.startsWith('RAG/') || r.task === 'RAG compare (3 modes)'));
             renderPrevRuns(ragRuns);
         }} catch(e) {{}}
     }}
@@ -2021,25 +2126,21 @@ async def rag_page():
             return;
         }}
         const rows = runs.map(r => {{
-            const date = r.saved_at ? r.saved_at.slice(0,16).replace('T',' ') : '—';
-            const summary = `${{r.model||''}} · ${{r.task||''}} · ${{r.mwh_per_token}} mWh/tok · ${{r.tokens_per_sec}} tok/s ${{r.confidence||''}}`;
+            const date = r.saved_at ? r.saved_at.slice(0,16).replace('T',' ') : '\u2014';
+            const summary = (r.model||'') + ' \xb7 ' + (r.task||'') + ' \xb7 ' + r.mwh_per_token + ' mWh/tok ' + (r.confidence||'');
             const base = '/results/llm/' + r.job_id;
-            return `<div style="border-bottom:1px solid #111;padding:0.6rem 0">
-                <div style="display:flex;justify-content:space-between;align-items:baseline">
-                    <span style="color:#e0e0e0;font-size:0.82rem">${{date}}</span>
-                    <span style="color:#555;font-size:0.75rem;font-family:monospace">${{r.job_id}}</span>
-                </div>
-                <div style="color:#00ff99;font-size:0.8rem;margin:0.2rem 0">${{summary}}</div>
-                <div style="display:flex;gap:0.5rem;margin-top:0.3rem">
-                    <a href="${{base}}/download.json" download
-                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ JSON</a>
-                    <a href="${{base}}/download.csv" download
-                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ CSV</a>
-                </div>
-            </div>`;
+            return '<div style="border-bottom:1px solid #111;padding:0.6rem 0">'
+                + '<div style="display:flex;justify-content:space-between;align-items:baseline">'
+                + '<span style="color:#e0e0e0;font-size:0.82rem">' + date + '</span>'
+                + '<span style="color:#555;font-size:0.75rem;font-family:monospace">' + r.job_id + '</span></div>'
+                + '<div style="color:#00ff99;font-size:0.8rem;margin:0.2rem 0">' + summary + '</div>'
+                + '<div style="display:flex;gap:0.5rem;margin-top:0.3rem">'
+                + '<a href="' + base + '/download.json" download style="color:#555;font-size:0.75rem;text-decoration:none">\u2193 JSON</a>'
+                + '<a href="' + base + '/download.csv" download style="color:#555;font-size:0.75rem;text-decoration:none">\u2193 CSV</a>'
+                + '</div></div>';
         }}).join('');
-        el.innerHTML = `<div style="color:#444;font-size:0.72rem;text-transform:uppercase;
-            letter-spacing:0.05em;margin-bottom:0.75rem">Previous RAG runs</div>${{rows}}`;
+        el.innerHTML = '<div style="color:#444;font-size:0.72rem;text-transform:uppercase;'
+            + 'letter-spacing:0.05em;margin-bottom:0.75rem">Previous RAG runs</div>' + rows;
     }}
 
     loadIndexStatus();
@@ -2047,6 +2148,7 @@ async def rag_page():
     const _resumeJob = new URLSearchParams(location.search).get('job');
     if (_resumeJob) {{ pollRag(_resumeJob); }}
     </script>
+    {_PROGRESS_JS}
     {_CONF_HELP_WIDGET}
     {_FOOTER}
 </body>
@@ -2055,11 +2157,11 @@ async def rag_page():
 
 @app.get("/rag/index-status")
 async def rag_index_status():
-    return {{
+    return {
         "status": rag_module.index_status,
         "doc_count": rag_module.index_doc_count,
         "error": rag_module.index_error,
-    }}
+    }
 
 
 @app.post("/rag/build-index")
@@ -2067,10 +2169,10 @@ async def rag_build_index(request: Request):
     body = await request.json()
     rebuild = bool(body.get("rebuild", False))
     if rag_module.index_status == "building":
-        return {{"status": "already_building"}}
+        return {"status": "already_building"}
     loop = asyncio.get_event_loop()
     asyncio.create_task(loop.run_in_executor(None, lambda: rag_module.build_index(rebuild)))
-    return {{"status": "started"}}
+    return {"status": "started"}
 
 
 @app.post("/rag/run")
@@ -2080,33 +2182,84 @@ async def rag_run(
     question: str = Form(...),
 ):
     if model_key not in rag_module.MODELS:
-        return JSONResponse({{"error": "Invalid model"}}, status_code=400)
+        return JSONResponse({"error": "Invalid model"}, status_code=400)
     if rag_mode not in ("baseline", "rag", "rag_large"):
-        return JSONResponse({{"error": "Invalid rag_mode"}}, status_code=400)
+        return JSONResponse({"error": "Invalid rag_mode"}, status_code=400)
     if not question.strip():
-        return JSONResponse({{"error": "Question required"}}, status_code=400)
+        return JSONResponse({"error": "Question required"}, status_code=400)
     if rag_mode != "baseline" and rag_module.index_status != "ready":
-        return JSONResponse({{"error": "Index not ready — build it first"}}, status_code=400)
+        return JSONResponse({"error": "Index not ready — build it first"}, status_code=400)
 
     job_id = str(uuid.uuid4())[:8]
-    mode_labels = {{"baseline": "Baseline", "rag": "RAG", "rag_large": "RAG Large"}}
-    label = f"RAG — {{rag_module.MODELS[model_key]['label']}} · {{mode_labels[rag_mode]}}"
+    mode_labels = {"baseline": "Baseline", "rag": "RAG", "rag_large": "RAG Large"}
+    label = f"RAG — {rag_module.MODELS[model_key]['label']} · {mode_labels[rag_mode]}"
 
     async def coro():
         jobs[job_id]["stage"] = "baseline"
         result = await rag_module.run_rag_measurement(model_key, rag_mode, question.strip(), jobs, job_id)
         save_result("llm", job_id, result)
-        jobs[job_id] = {{"stage": "done", "result": result}}
+        jobs[job_id] = {"stage": "done", "result": result}
 
     position = enqueue(job_id, "rag", label, coro)
     if position is None:
-        return JSONResponse({{"error": "Queue full — try again later."}}, status_code=429)
-    return {{"job_id": job_id, "queue_position": position}}
+        return JSONResponse({"error": "Queue full — try again later."}, status_code=429)
+    return {"job_id": job_id, "queue_position": position}
 
 
-@app.get("/rag/job/{{job_id}}")
+@app.get("/rag/job/{job_id}")
 async def rag_job_status(job_id: str):
-    return jobs.get(job_id, {{"status": "not_found"}})
+    return jobs.get(job_id, {"status": "not_found"})
+
+
+async def run_rag_compare_job(job_id: str, model_key: str, question: str):
+    partial_results = {}
+    try:
+        for rag_mode in ("baseline", "rag", "rag_large"):
+            jobs[job_id]["current_mode"] = rag_mode
+            jobs[job_id]["stage"] = rag_mode
+            jobs[job_id]["partial_results"] = dict(partial_results)
+            result = await rag_module.run_rag_measurement(
+                model_key, rag_mode, question, jobs, job_id)
+            partial_results[rag_mode] = result
+            jobs[job_id]["partial_results"] = dict(partial_results)
+
+        final = {
+            "mode": "rag_compare",
+            "model_key": model_key,
+            "model_label": rag_module.MODELS[model_key]["label"],
+            "model_params": rag_module.MODELS[model_key]["params"],
+            "question": question,
+            "results": partial_results,
+            "scope": "Device layer only (GoS1). Network and CPE excluded. No amortised training cost.",
+        }
+        save_result("llm", job_id, final)
+        jobs[job_id] = {"stage": "done", "result": final}
+    except Exception as e:
+        jobs[job_id] = {"stage": "error", "error": str(e)}
+
+
+@app.post("/rag/run-compare")
+async def rag_run_compare(
+    model_key: str = Form(...),
+    question: str = Form(...),
+):
+    if model_key not in rag_module.MODELS:
+        return JSONResponse({"error": "Invalid model"}, status_code=400)
+    if not question.strip():
+        return JSONResponse({"error": "Question required"}, status_code=400)
+    if rag_module.index_status != "ready":
+        return JSONResponse({"error": "Index not ready — build it first"}, status_code=400)
+
+    job_id = str(uuid.uuid4())[:8]
+    label = f"RAG Compare — {rag_module.MODELS[model_key]['label']} · 3 modes"
+
+    async def coro():
+        await run_rag_compare_job(job_id, model_key, question.strip())
+
+    position = enqueue(job_id, "rag", label, coro)
+    if position is None:
+        return JSONResponse({"error": "Queue full — try again later."}, status_code=429)
+    return {"job_id": job_id, "queue_position": position}
 
 
 # --- Results: list, JSON download, CSV download ---
@@ -3399,6 +3552,7 @@ const STAGE_LABELS = {{
 }};
 let pollTimer = null;
 let selectedDevice = 'cpu';
+let imgStartTime = null;
 
 function fmt(v, dp=2) {{
   if (v === null || v === undefined) return '—';
@@ -3421,6 +3575,7 @@ async function startMeasurement() {{
   if (data.error) {{ alert(data.error); document.getElementById('run-btn').disabled=false; return; }}
   const jobId = data.job_id;
 
+  imgStartTime = Date.now();
   renderProgress('baseline', null, null);
   pollTimer = setInterval(() => pollJob(jobId), 1500);
 }}
@@ -3429,14 +3584,7 @@ async function pollJob(jobId) {{
   const r = await fetch('/image/job/' + jobId);
   const j = await r.json();
 
-  if (j.stage === 'queued') {{
-    document.getElementById('status').innerHTML =
-      '<div style="border:1px solid #333;padding:1.5rem">' +
-      '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">⏱ Queued — position ' + j.queue_position + '</div>' +
-      '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>' +
-      '</div>';
-    return;
-  }}
+  if (j.stage === 'queued') {{ wlRenderQueued(j.queue_position); return; }}
 
   const powerR = await fetch('/power');
   const powerJ = await powerR.json().catch(() => ({{}}));
@@ -3458,27 +3606,14 @@ async function pollJob(jobId) {{
 
 function renderProgress(stage, result, watts) {{
   const isBoth = BOTH_STAGES.includes(stage) && stage !== 'done';
-  const stages = isBoth ? BOTH_STAGES : CPU_STAGES;
-  const stageIdx = stages.indexOf(stage);
-  let stagesHtml = '';
-  stages.forEach((s, i) => {{
-    let icon = i < stageIdx ? '✓' : (i === stageIdx ? '⏳' : '·');
-    let col = i < stageIdx ? '#00ff99' : (i === stageIdx ? '#ffaa00' : '#333');
-    stagesHtml += `<div class="stage">
-      <span class="stage-icon" style="color:${{col}}">${{icon}}</span>
-      <span style="color:${{col}}">${{STAGE_LABELS[s] || s}}</span>
-    </div>`;
+  const stageKeys = isBoth ? BOTH_STAGES : CPU_STAGES;
+  const stageIdx = stageKeys.indexOf(stage);
+  wlRenderProgress({{
+    header: '\u26a1 Measuring\u2026 do not close this tab',
+    stagesHtml: wlStageList(stageKeys.map(s => STAGE_LABELS[s] || s), stageIdx),
+    watts: watts,
+    elapsed: imgStartTime ? Date.now() - imgStartTime : null,
   }});
-  const wattsHtml = watts !== null
-    ? `<div class="live-watts">${{fmt(watts,1)}} W</div>
-       <div style="color:#444;font-size:0.75rem">live wall power</div>`
-    : '';
-  document.getElementById('status').innerHTML = `
-    <div class="progress-box">
-      <div class="progress-header">⚡ Measuring…</div>
-      <div class="stages">${{stagesHtml}}</div>
-      ${{wattsHtml}}
-    </div>`;
 }}
 
 function _imageCard(label, pass_r, isWinner) {{
@@ -3569,6 +3704,7 @@ function renderResult(r) {{
 const _resumeJob = new URLSearchParams(location.search).get('job');
 if (_resumeJob) {{ document.getElementById('run-btn').disabled = true; pollTimer = setInterval(() => pollJob(_resumeJob), 1500); }}
 </script>
+    {_PROGRESS_JS}
     {_CONF_HELP_WIDGET}
     {_FOOTER}
 </body>
