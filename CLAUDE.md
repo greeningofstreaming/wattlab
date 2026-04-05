@@ -154,11 +154,19 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] Prompt variation per run (random colour/mood modifier)
 - [x] GPU image generation — SD-Turbo via PyTorch ROCm, batch of 5 images, HSA_OVERRIDE_GFX_VERSION=11.0.0
 
-### Phase 6 — Public Access (session 6)
-- [ ] nginx reverse proxy
-- [ ] Let's Encrypt SSL
-- [ ] wattlab.greeningofstreaming.org domain
-- [ ] Block /settings from public URL
+### Phase 6 — Public Access (session 5 partial)
+- [x] Block /settings from public URL (nginx 403 + FastAPI Host header check)
+- [x] nginx config written: `infra/wattlab.nginx.conf`
+- [x] Setup script written: `infra/setup-nginx.sh`
+- [ ] Run setup script on GoS1: `sudo bash infra/setup-nginx.sh`
+- [ ] BouyguesBox: forward TCP 80+443 → 192.168.1.62
+- [ ] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254`
+- [ ] Let's Encrypt SSL: `sudo certbot --nginx -d wattlab.greeningofstreaming.org`
+- [ ] Enable HTTP→HTTPS redirect in nginx config, reload nginx
+
+### Deferred Polish
+- [ ] Image page progress bar: add elapsed time (video + LLM already have it)
+- [ ] GPU image generation: code complete, needs first test run to confirm + measure
 
 ## Key Findings to Date
 
@@ -175,7 +183,9 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 ### Image Generation CPU — SD-Turbo (first run) 🟢
 - 0.2063 Wh/image, 12.15s, ~30W delta above idle
 - Backend: CPU (Ryzen 9 7900), stabilityai/sd-turbo, 8 steps, 512×512
-- GPU deferred: z-image-turbo needs 11.9 GiB VRAM, only 11.1 GiB available
+- GPU path: code complete (float16, ROCm, batch of 5), needs first test run
+  - SD-Turbo float16 needs ~2-3 GB VRAM — well within 11.1 GB available
+  - Earlier "GPU deferred" note was about z-image-turbo (10.3B), not SD-Turbo
 
 ## Visual Identity
 - Logo: round bug mark from greeningofstreaming.org

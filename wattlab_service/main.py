@@ -3,7 +3,7 @@ import io
 import json
 import uuid
 from pathlib import Path
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from dotenv import dotenv_values
 from tapo import ApiClient
@@ -76,10 +76,16 @@ _LOGO = (
 # --- P110 ---
 
 async def get_power_watts() -> float:
-    client = ApiClient(config["TAPO_EMAIL"], config["TAPO_PASSWORD"])
-    device = await client.p110(config["TAPO_P110_IP"])
-    result = await device.get_energy_usage()
-    return result.current_power / 1000
+    for attempt in range(3):
+        try:
+            client = ApiClient(config["TAPO_EMAIL"], config["TAPO_PASSWORD"])
+            device = await client.p110(config["TAPO_P110_IP"])
+            result = await device.get_energy_usage()
+            return result.current_power / 1000
+        except Exception:
+            if attempt == 2:
+                raise
+            await asyncio.sleep(1)
 
 # --- Home ---
 
@@ -355,7 +361,7 @@ async def video_page():
         return m > 0 ? `${{m}}m ${{s % 60}}s` : `${{s}}s`;
     }}
 
-    function renderProgress(jobId, mode, serverStage) {{
+    function renderProgress(jobId, mode, serverStage, watts) {{
         const stages = STAGES[mode];
 
         const stageMap = STAGE_MAP[mode];
@@ -373,10 +379,15 @@ async def video_page():
         }}).join('');
 
         const elapsed = Date.now() - startTime;
+        const wattsHtml = watts != null
+            ? `<div style="font-size:1.8rem;color:#00ff99;font-family:monospace;margin:0.75rem 0 0.2rem">${{watts.toFixed(1)}} W</div>
+               <div style="color:#444;font-size:0.72rem;margin-bottom:0.25rem">live wall power</div>`
+            : '';
         document.getElementById('status').innerHTML = `
             <div class="progress-box">
                 <div class="progress-header">Running measurement — do not close this tab</div>
                 <div class="stages">${{stageHTML}}</div>
+                ${{wattsHtml}}
                 <div class="progress-footer">
                     <span>Job: ${{jobId}}</span>
                     <span class="elapsed">Elapsed: ${{formatElapsed(elapsed)}}</span>
@@ -430,8 +441,12 @@ async def video_page():
 
     async function pollJob(jobId, mode) {{
         try {{
-            const resp = await fetch('/video/job/' + jobId);
+            const [resp, powerR] = await Promise.all([
+                fetch('/video/job/' + jobId),
+                fetch('/power').catch(() => null),
+            ]);
             const data = await resp.json();
+            const watts = powerR ? (await powerR.json().catch(()=>({{}}))).watts ?? null : null;
             if (data.status === 'done') {{
                 stopProgress();
                 renderResult(data.result, jobId);
@@ -445,7 +460,7 @@ async def video_page():
                 renderQueued(data.queue_position);
                 setTimeout(() => pollJob(jobId, mode), 3000);
             }} else {{
-                renderProgress(jobId, mode, data.stage || "starting");
+                renderProgress(jobId, mode, data.stage || "starting", watts);
                 setTimeout(() => pollJob(jobId, mode), 5000);
             }}
         }} catch(e) {{
@@ -801,13 +816,13 @@ async def llm_page():
 
     <div id="prompt-editor" style="margin-bottom:1.5rem">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.4rem">
-            <div style="color:#555;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Prompt</div>
-            <button onclick="resetPrompt()" style="background:none;border:none;color:#444;
-                font-size:0.75rem;cursor:pointer;padding:0;font-family:monospace">Reset</button>
+            <div style="color:#aaa;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">✎ Edit prompt</div>
+            <button onclick="resetPrompt()" style="background:none;border:none;color:#555;
+                font-size:0.75rem;cursor:pointer;padding:0;font-family:monospace">Reset to default</button>
         </div>
         <textarea id="promptText" rows="3"
-            style="width:100%;background:#0f0f0f;border:1px solid #333;color:#ccc;
-                   font-family:monospace;font-size:0.8rem;padding:0.75rem;
+            style="width:100%;background:#0f0f0f;border:1px solid #444;border-left:2px solid #00ff9966;
+                   color:#ccc;font-family:monospace;font-size:0.8rem;padding:0.75rem;
                    resize:vertical;line-height:1.5"></textarea>
     </div>
 
@@ -873,7 +888,14 @@ async def llm_page():
         </div>
     </div>
 
-    <button id="runBtn" onclick="runInference()">Run Measurement</button>
+    <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
+        <button id="runBtn" onclick="runInference()">Run Measurement</button>
+        <button id="runAllBtn" onclick="runAllTasks()"
+            style="background:#0a0a0a;border:1px solid #00ff9966;color:#00ff99;
+                   padding:0.65rem 1.25rem;font-family:monospace;font-size:0.85rem;cursor:pointer">
+            Run All Tasks (T1+T2+T3)
+        </button>
+    </div>
     <div id="status"></div>
     <a class="back" href="/">← Back to power monitor</a>
     <div id="prev-runs" style="margin-top:2rem;border-top:1px solid #111;padding-top:1.5rem"></div>
@@ -909,7 +931,7 @@ async def llm_page():
         return m > 0 ? m + 'm ' + (s%60) + 's' : s + 's';
     }}
 
-    function renderProgress(stage) {{
+    function renderProgress(stage, watts) {{
         // Normalise batch/both stages for display
         const isBoth = stage.startsWith('baseline_cpu') || stage.startsWith('cpu_') ||
                        stage.startsWith('baseline_gpu') || stage.startsWith('gpu_') ||
@@ -944,11 +966,16 @@ async def llm_page():
             </div>`;
         }}).join('');
         const elapsed = startTime ? formatElapsed(Date.now() - startTime) : '0s';
+        const wattsHtml = watts != null
+            ? `<div style="font-size:1.8rem;color:#00ff99;font-family:monospace;margin-top:0.75rem">${{watts.toFixed(1)}} W</div>
+               <div style="color:#444;font-size:0.72rem;margin-bottom:0.5rem">live wall power</div>`
+            : '';
         document.getElementById('status').innerHTML = `
             <div class="progress-box">
                 <div class="progress-header">Running — do not close this tab</div>
                 ${{stageHTML}}
-                <div style="color:#444;font-size:0.78rem;margin-top:0.75rem">
+                ${{wattsHtml}}
+                <div style="color:#444;font-size:0.78rem;margin-top:0.5rem">
                     Elapsed: ${{elapsed}}
                 </div>
                 <div id="stream-preview" style="margin-top:0.75rem;background:#111;
@@ -992,8 +1019,12 @@ async def llm_page():
 
     async function pollLLM(jobId) {{
         try {{
-            const resp = await fetch('/llm/job/' + jobId);
+            const [resp, powerR] = await Promise.all([
+                fetch('/llm/job/' + jobId),
+                fetch('/power').catch(() => null),
+            ]);
             const data = await resp.json();
+            const watts = powerR ? (await powerR.json().catch(()=>({{}}))).watts ?? null : null;
             if (data.status === 'done') {{
                 if (streamTimer) {{ clearTimeout(streamTimer); streamTimer = null; }}
                 renderLLMResult(data.result, jobId);
@@ -1012,7 +1043,7 @@ async def llm_page():
                 streamTimer = setTimeout(() => pollLLM(jobId), 3000);
             }} else {{
                 const stage = data.stage || 'baseline';
-                renderProgress(stage);
+                renderProgress(stage, watts);
                 if (stage.startsWith('inference') && data.partial_response) {{
                     const box = document.getElementById('stream-preview');
                     if (box) box.textContent = data.partial_response;
@@ -1044,6 +1075,10 @@ async def llm_page():
             body = renderLLMBoth(r);
         }} else if (r.mode === 'batch') {{
             body = renderLLMBatch(r);
+        }} else if (r.mode === 'all') {{
+            body = renderLLMAll(r);
+        }} else if (r.mode === 'all_both') {{
+            body = renderLLMAllBoth(r);
         }} else {{
             body = renderLLMSingle(r);
         }}
@@ -1135,6 +1170,8 @@ async def llm_page():
                     <span class="val">${{t.cpu_base}}→${{t.cpu_end}}°C</span></div>
                 <div class="metric"><span>GPU (start→end)</span>
                     <span class="val">${{t.gpu_base}}→${{t.gpu_end}}°C</span></div>
+                <div class="section-title">Response preview (last run)</div>
+                <div class="response-box">${{r.runs[r.runs.length-1].inference.response}}</div>
                 <div class="scope-note">${{r.scope}}</div>
             </div>`;
     }}
@@ -1181,6 +1218,166 @@ async def llm_page():
             <div class="response-box">${{gi.response}}</div>
             <div class="scope-note">${{r.scope}}</div>
         </div>`;
+    }}
+
+    function renderLLMAll(r) {{
+        const taskLabels = {{'T1': 'Short factual', 'T2': 'Medium reasoning', 'T3': 'Long generation'}};
+        const cards = Object.entries(r.tasks).map(([key, t]) => {{
+            const e = t.energy;
+            const i = t.inference;
+            return `<div style="border:1px solid #222;padding:1rem;margin-bottom:0.75rem">
+                <div style="color:#00ff99;font-size:0.78rem;margin-bottom:0.75rem">${{key}} — ${{taskLabels[key] || key}}</div>
+                <div class="metric"><span>Output tokens</span><span class="val">${{i.output_tokens}}</span></div>
+                <div class="metric"><span>Tokens/sec</span><span class="val">${{i.tokens_per_sec}}</span></div>
+                <div class="metric"><span>Duration</span><span class="val">${{i.duration_s}}s</span></div>
+                <div class="metric"><span>ΔE</span><span class="val">${{e.delta_e_wh}} Wh</span></div>
+                <div class="metric"><span>mWh/token</span><span class="val">${{e.mwh_per_token}}</span></div>
+                <div class="metric"><span>ΔW</span><span class="val">${{e.delta_w}} W</span></div>
+                <div style="margin-top:0.5rem;font-size:0.82rem">${{e.confidence.flag}} ${{e.confidence.label}}</div>
+                <div class="section-title" style="margin-top:0.75rem">Response preview</div>
+                <div class="response-box">${{i.response}}</div>
+            </div>`;
+        }}).join('');
+        return `<div class="result-box">
+            <h2>All Tasks — ${{r.model_label}} (${{r.model_params}})</h2>
+            <div style="color:#555;font-size:0.78rem;margin-bottom:1rem">
+                ${{r.warm ? '🌡 Warm' : '❄ Cold'}} · ${{r.device.toUpperCase()}} · 3 tasks
+            </div>
+            ${{cards}}
+            <div class="scope-note">${{r.scope}}</div>
+        </div>`;
+    }}
+
+    function renderLLMAllBoth(r) {{
+        const taskLabels = {{'T1':'Short factual','T2':'Medium reasoning','T3':'Long generation'}};
+        const winCol = (cpu_val, gpu_val, lower_is_better) => {{
+            if (cpu_val == null || gpu_val == null) return ['#ccc','#ccc'];
+            const cpuWins = lower_is_better ? cpu_val <= gpu_val : cpu_val >= gpu_val;
+            return cpuWins ? ['#00ff99','#888'] : ['#888','#00ff99'];
+        }};
+        const rows = Object.keys(taskLabels).map(tk => {{
+            const cpu = r.cpu[tk] || {{}};
+            const gpu = r.gpu[tk] || {{}};
+            const ce = cpu.energy || {{}};
+            const ge = gpu.energy || {{}};
+            const ci = cpu.inference || {{}};
+            const gi = gpu.inference || {{}};
+            const [cSpeedCol, gSpeedCol] = winCol(ci.tokens_per_sec, gi.tokens_per_sec, false);
+            const [cECol, gECol] = winCol(ce.mwh_per_token, ge.mwh_per_token, true);
+            return `<tr style="border-bottom:1px solid #111">
+                <td style="padding:0.5rem 0.75rem 0.5rem 0;color:#888;font-size:0.78rem">${{tk}}<br><span style="font-size:0.7rem;color:#444">${{taskLabels[tk]}}</span></td>
+                <td style="padding:0.5rem 0.75rem;font-size:0.8rem;color:${{cSpeedCol}}">${{ci.tokens_per_sec ?? '—'}}</td>
+                <td style="padding:0.5rem 0.75rem;font-size:0.8rem;color:${{gSpeedCol}}">${{gi.tokens_per_sec ?? '—'}}</td>
+                <td style="padding:0.5rem 0.75rem;font-size:0.8rem;color:${{cECol}}">${{ce.mwh_per_token ?? '—'}}</td>
+                <td style="padding:0.5rem 0.75rem;font-size:0.8rem;color:${{gECol}}">${{ge.mwh_per_token ?? '—'}}</td>
+                <td style="padding:0.5rem 0;font-size:0.78rem">${{ce.confidence ? ce.confidence.flag : ''}} ${{ge.confidence ? ge.confidence.flag : ''}}</td>
+            </tr>`;
+        }}).join('');
+        return `<div class="result-box">
+            <h2>All Tasks CPU vs GPU — ${{r.model_label}} (${{r.model_params}})</h2>
+            <div style="color:#555;font-size:0.78rem;margin-bottom:1rem">${{r.warm ? '🌡 Warm' : '❄ Cold'}} · 3 tasks × 2 backends</div>
+            <table style="width:100%;border-collapse:collapse">
+                <thead><tr style="color:#444;font-size:0.72rem;text-align:left;border-bottom:1px solid #222">
+                    <th style="padding:0.4rem 0.75rem 0.4rem 0">Task</th>
+                    <th style="padding:0.4rem 0.75rem">CPU tok/s</th>
+                    <th style="padding:0.4rem 0.75rem">GPU tok/s</th>
+                    <th style="padding:0.4rem 0.75rem">CPU mWh/tok</th>
+                    <th style="padding:0.4rem 0.75rem">GPU mWh/tok</th>
+                    <th style="padding:0.4rem 0">Conf</th>
+                </tr></thead>
+                <tbody>${{rows}}</tbody>
+            </table>
+            <div class="scope-note" style="margin-top:1rem">${{r.scope}}</div>
+        </div>`;
+    }}
+
+    async function runAllTasks() {{
+        const btn = document.getElementById('runAllBtn');
+        const runBtn = document.getElementById('runBtn');
+        btn.disabled = true;
+        runBtn.disabled = true;
+        startTime = Date.now();
+
+        const form = new FormData();
+        form.append('model_key', selectedModel);
+        form.append('warm', selectedWarm ? 'true' : 'false');
+        form.append('device', selectedDevice);  // cpu / gpu / both all supported
+
+        try {{
+            const resp = await fetch('/llm/run-all', {{method:'POST', body:form}});
+            const data = await resp.json();
+            if (data.job_id) {{
+                renderProgress('T1_baseline');
+                pollLLMAll(data.job_id);
+            }} else {{
+                document.getElementById('status').innerHTML =
+                    '<div style="color:#ff4400">Error: ' + JSON.stringify(data) + '</div>';
+                btn.disabled = false; runBtn.disabled = false;
+            }}
+        }} catch(e) {{
+            document.getElementById('status').innerHTML =
+                '<div style="color:#ff4400">Failed: ' + e + '</div>';
+            btn.disabled = false; runBtn.disabled = false;
+        }}
+    }}
+
+    async function pollLLMAll(jobId) {{
+        try {{
+            const [resp, powerR] = await Promise.all([
+                fetch('/llm/job/' + jobId),
+                fetch('/power').catch(() => null),
+            ]);
+            const data = await resp.json();
+            const watts = powerR ? (await powerR.json().catch(()=>({{}}))).watts ?? null : null;
+            if (data.status === 'done') {{
+                if (streamTimer) {{ clearTimeout(streamTimer); streamTimer = null; }}
+                renderLLMResult(data.result, jobId);
+                document.getElementById('runBtn').disabled = false;
+                document.getElementById('runAllBtn').disabled = false;
+            }} else if (data.status === 'error') {{
+                if (streamTimer) {{ clearTimeout(streamTimer); streamTimer = null; }}
+                document.getElementById('status').innerHTML =
+                    '<div style="color:#ff4400">Error: ' + data.error + '</div>';
+                document.getElementById('runBtn').disabled = false;
+                document.getElementById('runAllBtn').disabled = false;
+            }} else if (data.stage === 'queued') {{
+                document.getElementById('status').innerHTML =
+                    '<div style="border:1px solid #333;padding:1.5rem">' +
+                    '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">⏱ Queued — position ' + data.queue_position + '</div>' +
+                    '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>' +
+                    '</div>';
+                streamTimer = setTimeout(() => pollLLMAll(jobId), 3000);
+            }} else {{
+                const task = data.current_task || 'T1';
+                const dev = data.current_device || '';
+                const stage = data.stage || 'baseline';
+                const taskNums = {{'T1':1,'T2':2,'T3':3}};
+                const taskNum = taskNums[task] || 1;
+                const wattsHtml = watts != null
+                    ? `<div style="font-size:1.8rem;color:#00ff99;font-family:monospace;margin:0.75rem 0 0.2rem">${{watts.toFixed(1)}} W</div>
+                       <div style="color:#444;font-size:0.72rem;margin-bottom:0.5rem">live wall power</div>`
+                    : '';
+                const devBadge = dev ? `<span style="color:#555;font-size:0.72rem;margin-left:0.5rem">(${{dev.toUpperCase()}})</span>` : '';
+                const taskPips = ['T1','T2','T3'].map(k => {{
+                    const s = k === task ? 'active' : taskNums[k] < taskNum ? 'done' : 'pending';
+                    const color = s === 'done' ? '#00ff99' : s === 'active' ? '#ffaa00' : '#333';
+                    return `<span style="border:1px solid ${{color}};padding:0.2rem 0.5rem;font-size:0.78rem;color:${{color}}">${{k}}</span>`;
+                }}).join('');
+                document.getElementById('status').innerHTML = `
+                    <div class="progress-box">
+                        <div class="progress-header">Running All Tasks — do not close this tab</div>
+                        <div style="color:#888;font-size:0.82rem;margin-bottom:0.5rem">
+                            ${{task}}${{devBadge}} · ${{stage}}
+                        </div>
+                        <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">${{taskPips}}</div>
+                        ${{wattsHtml}}
+                        <div style="color:#444;font-size:0.78rem">Elapsed: ${{startTime ? formatElapsed(Date.now()-startTime) : '0s'}}</div>
+                    </div>`;
+                streamTimer = setTimeout(() => pollLLMAll(jobId), 3000);
+            }}
+        }} catch(e) {{
+            streamTimer = setTimeout(() => pollLLMAll(jobId), 5000);
+        }}
     }}
 
     async function loadPrevRuns() {{
@@ -1253,6 +1450,73 @@ async def llm_run(
     position = enqueue(job_id, "llm", label, coro)
     return {"job_id": job_id, "queue_position": position}
 
+
+async def run_llm_all_job(job_id: str, model_key: str, warm: bool, device: str):
+    try:
+        devices = ["cpu", "gpu"] if device == "both" else [device]
+        jobs[job_id] = {"status": "running", "stage": "baseline",
+                        "current_task": "T1", "current_device": devices[0], "partial_response": ""}
+        dev_results = {}
+        for dev in devices:
+            task_results = {}
+            for task_key in ["T1", "T2", "T3"]:
+                jobs[job_id]["current_task"] = task_key
+                jobs[job_id]["current_device"] = dev
+                result = await run_llm_measurement(
+                    model_key, task_key, jobs, job_id, warm, None, dev)
+                task_results[task_key] = result
+            dev_results[dev] = task_results
+
+        if device == "both":
+            final = {
+                "mode": "all_both",
+                "model_key": model_key,
+                "model_label": MODELS[model_key]["label"],
+                "model_params": MODELS[model_key]["params"],
+                "warm": warm,
+                "device": device,
+                "cpu": dev_results["cpu"],
+                "gpu": dev_results["gpu"],
+                "scope": "Device layer only (GoS1). Network and CPE excluded. No amortised training cost.",
+            }
+        else:
+            final = {
+                "mode": "all",
+                "model_key": model_key,
+                "model_label": MODELS[model_key]["label"],
+                "model_params": MODELS[model_key]["params"],
+                "warm": warm,
+                "device": device,
+                "tasks": dev_results[device],
+                "scope": "Device layer only (GoS1). Network and CPE excluded. No amortised training cost.",
+            }
+        save_result("llm", job_id, final)
+        jobs[job_id] = {"status": "done", "stage": "done", "result": final}
+    except Exception as e:
+        jobs[job_id] = {"status": "error", "stage": "error", "error": str(e)}
+
+
+@app.post("/llm/run-all")
+async def llm_run_all(
+    model_key: str = Form(...),
+    warm: bool = Form(False),
+    device: str = Form("gpu"),
+):
+    if model_key not in MODELS:
+        return JSONResponse({"error": "Invalid model"}, status_code=400)
+    if device not in ("cpu", "gpu", "both"):
+        return JSONResponse({"error": "device must be cpu, gpu, or both"}, status_code=400)
+
+    job_id = str(uuid.uuid4())[:8]
+    label = f"LLM All Tasks — {MODELS[model_key]['label']} · {device.upper()}"
+
+    async def coro():
+        await run_llm_all_job(job_id, model_key, warm, device)
+
+    position = enqueue(job_id, "llm", label, coro)
+    return {"job_id": job_id, "queue_position": position}
+
+
 @app.get("/llm/job/{job_id}")
 async def llm_job_status(job_id: str):
     return jobs.get(job_id, {"status": "not_found"})
@@ -1321,8 +1585,16 @@ async def results_download_csv(job_type: str, job_id: str):
 
 # --- Settings ---
 
+def _is_local(request: Request) -> bool:
+    """True if request came via SSH tunnel or LAN (not the public domain)."""
+    host = request.headers.get("host", "")
+    return "greeningofstreaming.org" not in host
+
+
 @app.get("/settings", response_class=HTMLResponse)
-async def settings_page():
+async def settings_page(request: Request):
+    if not _is_local(request):
+        return HTMLResponse("<h1>403 Forbidden</h1><p>Settings are not available on the public URL.</p>", status_code=403)
     s = cfg.load()
     return f"""<!DOCTYPE html>
 <html>
@@ -1470,7 +1742,9 @@ async def settings_page():
 
 
 @app.post("/settings")
-async def settings_save(data: dict):
+async def settings_save(request: Request, data: dict):
+    if not _is_local(request):
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
     saved = cfg.save(data)
     return {"ok": True, "settings": saved}
 
@@ -2249,25 +2523,53 @@ async def image_page():
     if prev_runs:
         prev_html = '<div class="prev-runs"><h3>Previous runs</h3>'
         for r in prev_runs:
-            conf = r.get("confidence", {})
             fp = r.get("full_prompt", "")
-            img_tag = ""
-            if r.get("b64_png"):
-                img_tag = f'<img src="data:image/png;base64,{r["b64_png"]}" style="width:80px;height:80px;object-fit:cover;vertical-align:middle;margin-right:0.75rem">'
-            date_str = (r.get("saved_at") or "")[:10]
-            prev_html += f"""<div class="prev-item">
-              {img_tag}
-              <span class="prev-meta">
-                {date_str} &nbsp;·&nbsp; {conf.get("flag","")} {conf.get("label","")}
-                &nbsp;·&nbsp; {r.get("delta_e_wh","?")} Wh/image
-                &nbsp;·&nbsp; {r.get("delta_t_s","?")}s
-              </span>
-              <div class="prev-prompt" style="color:#555;font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
-              <div style="margin-top:0.3rem">
-                <a href="/results/image/{r['job_id']}/download.json" download style="color:#333;font-size:0.72rem;text-decoration:none;margin-right:0.75rem">↓ JSON</a>
-                <a href="/results/image/{r['job_id']}/download.csv" download style="color:#333;font-size:0.72rem;text-decoration:none">↓ CSV</a>
-              </div>
-            </div>"""
+            date_str = (r.get("saved_at") or "")[:16].replace("T", " ")
+            mode = r.get("mode", "cpu")
+            downloads = (
+                f'<a href="/results/image/{r["job_id"]}/download.json" download '
+                f'style="color:#333;font-size:0.72rem;text-decoration:none;margin-right:0.75rem">↓ JSON</a>'
+                f'<a href="/results/image/{r["job_id"]}/download.csv" download '
+                f'style="color:#333;font-size:0.72rem;text-decoration:none">↓ CSV</a>'
+            )
+            if mode == "both":
+                def _side_html(label, s):
+                    img = (f'<img src="data:image/png;base64,{s["b64_png"]}" '
+                           f'style="width:64px;height:64px;object-fit:cover;margin-right:0.5rem">'
+                           if s.get("b64_png") else "")
+                    conf = s.get("confidence", {})
+                    return (f'<div style="display:flex;align-items:center;margin-top:0.4rem">'
+                            f'{img}<span style="color:#555;font-size:0.78rem">'
+                            f'<span style="color:#aaa">{label}</span> &nbsp;·&nbsp; '
+                            f'{conf.get("flag","")} {conf.get("label","")} &nbsp;·&nbsp; '
+                            f'{s.get("delta_e_wh","?")} Wh &nbsp;·&nbsp; {s.get("delta_t_s","?")}s'
+                            f'</span></div>')
+                prev_html += f"""<div class="prev-item" style="flex-direction:column;align-items:flex-start">
+                  <span class="prev-meta">{date_str} &nbsp;·&nbsp; CPU vs GPU</span>
+                  {_side_html("CPU", r.get("cpu", {}))}
+                  {_side_html("GPU", r.get("gpu", {}))}
+                  <div class="prev-prompt" style="color:#555;font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
+                  <div style="margin-top:0.3rem">{downloads}</div>
+                </div>"""
+            else:
+                conf = r.get("confidence", {})
+                img_tag = (f'<img src="data:image/png;base64,{r["b64_png"]}" '
+                           f'style="width:80px;height:80px;object-fit:cover;vertical-align:middle;margin-right:0.75rem">'
+                           if r.get("b64_png") else "")
+                mode_label = {"cpu": "CPU", "gpu": "GPU"}.get(mode, mode)
+                prev_html += f"""<div class="prev-item">
+                  {img_tag}
+                  <div>
+                    <span class="prev-meta">
+                      {date_str} &nbsp;·&nbsp; {mode_label}
+                      &nbsp;·&nbsp; {conf.get("flag","")} {conf.get("label","")}
+                      &nbsp;·&nbsp; {r.get("delta_e_wh","?")} Wh/image
+                      &nbsp;·&nbsp; {r.get("delta_t_s","?")}s
+                    </span>
+                    <div class="prev-prompt" style="color:#555;font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
+                    <div style="margin-top:0.3rem">{downloads}</div>
+                  </div>
+                </div>"""
         prev_html += "</div>"
 
     return f"""<!DOCTYPE html>

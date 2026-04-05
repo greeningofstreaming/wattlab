@@ -23,7 +23,7 @@ def list_results(job_type: str, limit: int = 10) -> list:
     out_dir = RESULTS_DIR / job_type
     if not out_dir.exists():
         return []
-    files = sorted(out_dir.glob("*.json"), reverse=True)[:limit]
+    files = list(out_dir.glob("*.json"))
     results = []
     for f in files:
         try:
@@ -31,7 +31,8 @@ def list_results(job_type: str, limit: int = 10) -> list:
             results.append(_summarise(job_type, data))
         except Exception:
             pass
-    return results
+    results.sort(key=lambda r: r.get("saved_at") or "", reverse=True)
+    return results[:limit]
 
 
 def load_result(job_type: str, job_id: str) -> dict | None:
@@ -82,13 +83,27 @@ def to_csv(job_type: str, data: dict) -> str:
 def _summarise(job_type: str, data: dict) -> dict:
     summary = {"job_id": data.get("job_id"), "saved_at": data.get("saved_at")}
     if job_type == "image":
-        e = data.get("energy", {})
-        gen = data.get("generation", {})
-        summary["delta_e_wh"] = e.get("delta_e_wh")
-        summary["delta_t_s"] = gen.get("total_s")
-        summary["confidence"] = e.get("confidence", {})
+        mode = data.get("mode", "cpu")
+        summary["mode"] = mode
         summary["full_prompt"] = data.get("full_prompt", data.get("prompt", ""))
-        summary["b64_png"] = gen.get("b64_png", "")
+        if mode == "both":
+            for side in ("cpu", "gpu"):
+                s = data.get(side, {})
+                e = s.get("energy", {})
+                gen = s.get("generation", {})
+                summary[side] = {
+                    "delta_e_wh": e.get("delta_e_wh"),
+                    "delta_t_s": gen.get("total_s"),
+                    "confidence": e.get("confidence", {}),
+                    "b64_png": gen.get("b64_png", ""),
+                }
+        else:
+            e = data.get("energy", {})
+            gen = data.get("generation", {})
+            summary["delta_e_wh"] = e.get("delta_e_wh")
+            summary["delta_t_s"] = gen.get("total_s")
+            summary["confidence"] = e.get("confidence", {})
+            summary["b64_png"] = gen.get("b64_png", "")
         return summary
     elif job_type == "video":
         mode = data.get("mode", "?")
@@ -109,11 +124,39 @@ def _summarise(job_type: str, data: dict) -> dict:
             summary["delta_e_wh"] = e.get("delta_e_wh")
             summary["duration_s"] = e.get("delta_t_s")
             summary["confidence"] = e.get("confidence", {}).get("flag")
-    else:
-        e = data.get("energy", {})
-        i = data.get("inference", {})
+    else:  # llm
+        mode = data.get("mode", "single")
         summary["model"] = data.get("model_label")
-        summary["task"] = data.get("task_label")
+        if mode == "all":
+            summary["task"] = "T1+T2+T3"
+            t3 = data.get("tasks", {}).get("T3", {})
+            e = t3.get("energy", {})
+            i = t3.get("inference", {})
+        elif mode == "all_both":
+            summary["task"] = "T1+T2+T3 · CPU vs GPU"
+            t3 = data.get("gpu", {}).get("T3", {})
+            e = t3.get("energy", {})
+            i = t3.get("inference", {})
+        elif mode == "both":
+            summary["task"] = data.get("task_label")
+            gpu = data.get("gpu", {})
+            e = gpu.get("energy", {})
+            i = gpu.get("inference", {})
+        elif mode == "batch":
+            summary["task"] = data.get("task_label")
+            agg = data.get("aggregate", {})
+            runs = data.get("runs", [])
+            summary["mwh_per_token"] = agg.get("mwh_per_token_mean")
+            summary["tokens_per_sec"] = agg.get("tokens_per_sec_mean")
+            try:
+                summary["confidence"] = runs[-1]["energy"]["confidence"]["flag"]
+            except (IndexError, KeyError):
+                summary["confidence"] = None
+            return summary
+        else:  # single
+            summary["task"] = data.get("task_label")
+            e = data.get("energy", {})
+            i = data.get("inference", {})
         summary["mwh_per_token"] = e.get("mwh_per_token")
         summary["tokens_per_sec"] = i.get("tokens_per_sec")
         summary["confidence"] = e.get("confidence", {}).get("flag")
@@ -176,22 +219,56 @@ def _video_result_row(common: dict, r: dict) -> dict:
 
 
 def _llm_rows(data: dict) -> list:
-    e = data.get("energy", {})
-    i = data.get("inference", {})
-    t = data.get("thermals", {})
-    return [{
-        "job_id": data.get("job_id"),
-        "saved_at": data.get("saved_at"),
-        "model": data.get("model_label"),
-        "task": data.get("task_label"),
-        "duration_s": i.get("duration_s"),
-        "output_tokens": i.get("output_tokens"),
-        "tokens_per_sec": i.get("tokens_per_sec"),
-        "w_base": e.get("w_base"), "w_task": e.get("w_task"),
-        "delta_w": e.get("delta_w"), "delta_e_wh": e.get("delta_e_wh"),
-        "mwh_per_token": e.get("mwh_per_token"),
-        "poll_count": e.get("poll_count"),
-        "confidence": e.get("confidence", {}).get("label"),
-        "cpu_base": t.get("cpu_base"),
-        "gpu_base": t.get("gpu_base"),
-    }]
+    mode = data.get("mode", "single")
+    common = {"job_id": data.get("job_id"), "saved_at": data.get("saved_at"),
+              "model": data.get("model_label")}
+
+    def _row(task_label, i, e, t):
+        return {**common,
+            "task": task_label,
+            "duration_s": i.get("duration_s"),
+            "output_tokens": i.get("output_tokens"),
+            "tokens_per_sec": i.get("tokens_per_sec"),
+            "w_base": e.get("w_base"), "w_task": e.get("w_task"),
+            "delta_w": e.get("delta_w"), "delta_e_wh": e.get("delta_e_wh"),
+            "mwh_per_token": e.get("mwh_per_token"),
+            "poll_count": e.get("poll_count"),
+            "confidence": e.get("confidence", {}).get("label"),
+            "cpu_base": t.get("cpu_base"), "gpu_base": t.get("gpu_base"),
+        }
+
+    if mode == "all":
+        rows = []
+        for tk, tr in data.get("tasks", {}).items():
+            rows.append(_row(f"{tk} {tr.get('task_label','')}",
+                             tr.get("inference", {}), tr.get("energy", {}),
+                             tr.get("thermals", {})))
+        return rows
+    elif mode == "all_both":
+        rows = []
+        for dev in ("cpu", "gpu"):
+            for tk, tr in data.get(dev, {}).items():
+                rows.append(_row(f"{tk} {tr.get('task_label','')} ({dev})",
+                                 tr.get("inference", {}), tr.get("energy", {}),
+                                 tr.get("thermals", {})))
+        return rows
+    elif mode == "both":
+        rows = []
+        for dev in ("cpu", "gpu"):
+            tr = data.get(dev, {})
+            rows.append(_row(f"{data.get('task_label','')} ({dev})",
+                             tr.get("inference", {}), tr.get("energy", {}),
+                             tr.get("thermals", {})))
+        return rows
+    elif mode == "batch":
+        rows = []
+        t = data.get("thermals", {})
+        for run in data.get("runs", []):
+            rows.append(_row(f"{data.get('task_label','')} run {run['run']}",
+                             run.get("inference", {}), run.get("energy", {}), t))
+        return rows
+    else:  # single
+        e = data.get("energy", {})
+        i = data.get("inference", {})
+        t = data.get("thermals", {})
+        return [_row(data.get("task_label", ""), i, e, t)]

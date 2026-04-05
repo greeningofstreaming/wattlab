@@ -7,6 +7,164 @@ Scope: device layer only (GoS1). Network, CDN, and CPE explicitly excluded.
 
 ---
 
+## Session 6 — 2026-04-05
+
+### What we did
+
+**Phase 6 progress + GPU image gen confirmed + bug fixes**
+
+#### Phase 6 — Public access progress
+- nginx setup script run on GoS1 (Step 1 complete)
+- BouyguesBox port forwarding configured: TCP 80 + 443 → 192.168.1.62 (named `wattlab-http` / `wattlab-https`)
+  - Pre-existing rules `apache` (port 80) and `ssh` (port 22) deleted first — both pointed to 192.168.1.1 and were left over from the owner's son's personal projects. Port 80 conflict would have silently broken nginx.
+- DNS A record blocked until after Easter — requires Wix domain admin access not yet granted
+- Confirmed: GoS1 auto-starts correctly after reboot (wattlab + ollama both `systemctl enabled`)
+- Confirmed: uploaded test videos are deleted after transcoding (`delete_after=True` in `run_job`)
+
+#### GPU image generation — first confirmed run
+- SD-Turbo float16, ROCm, batch of 5 images, 20 steps, 512×512 — works correctly
+- Image displays in result, prompt variation working
+- (Measurement figures to be added once a clean run is recorded)
+
+#### Image Previous Runs — bug fixes
+- **Missing thumbnails for "both" mode:** `_summarise` was looking for `generation.b64_png` at top level; for "both" mode results it's nested under `cpu.generation` / `gpu.generation`. Fixed.
+- **No CPU/GPU label:** mode not included in summary or template. Fixed — now shows CPU / GPU / CPU+GPU.
+- **"both" mode showed only one row:** template rendered a single entry regardless of mode. Fixed — "both" runs now render two rows (CPU and GPU) each with their own thumbnail, confidence badge, Wh, and time.
+- **Ordering:** `list_results` was sorting by filename (date + UUID), so runs within the same day appeared in arbitrary order. Fixed — now sorts by `saved_at` ISO timestamp, newest first. Date display also upgraded to `YYYY-MM-DD HH:MM` for disambiguation.
+
+### Deferred
+- DNS A record + SSL cert (after Easter, pending Wix admin access)
+- GPU image generation measurement figures (next clean run)
+- Image page elapsed time in progress bar (still outstanding from session 5)
+
+---
+
+## Session 5 — 2026-04-05
+
+### What we built
+
+**Deferred items catchup + Phase 6 prep**
+
+#### LLM — prompt textarea visibility
+- Label changed from dim `#555` to `#aaa` with `✎ Edit prompt` text
+- Textarea border brightened to `#444` with green left accent (`#00ff9966`)
+- Reset button relabelled "Reset to default"
+
+#### LLM — batch result card response text (bug fix)
+- `renderLLMBatch` was missing the generated text from the last run
+- Added "Response preview (last run)" section: `r.runs[r.runs.length-1].inference.response`
+
+#### LLM — Run All Tasks (T1+T2+T3) feature
+- New "Run All Tasks (T1+T2+T3)" button alongside the existing Run Measurement button
+- New backend: `run_llm_all_job()` runs T1 → T2 → T3 sequentially, each with cold baseline
+- Supports CPU / GPU / Both ⚡ (via the existing device selector)
+  - **Both mode** (`mode: "all_both"`): runs all 3 tasks on CPU, then all 3 on GPU
+  - Produces a comparison table: T1/T2/T3 rows × CPU tok/s / GPU tok/s / CPU mWh/tok / GPU mWh/tok, green = winner
+- New `/llm/run-all` endpoint (POST, accepts `model_key`, `warm`, `device`)
+- New JS: `runAllTasks()`, `pollLLMAll()`, `renderLLMAll()`, `renderLLMAllBoth()`
+- Progress display shows T1/T2/T3 pips + current device badge + live wall power
+
+#### Previous runs null record fix (bug fix)
+- `persist.py _summarise()` only handled `mode: "single"` — returned null for batch/both/all/all_both
+- Fixed to handle all LLM modes:
+  - `single`: top-level energy/inference (unchanged)
+  - `batch`: uses aggregate mean stats
+  - `both`: uses GPU side energy/inference
+  - `all`: uses T3 as representative, shows "T1+T2+T3" as task label
+  - `all_both`: uses GPU T3, shows "T1+T2+T3 · CPU vs GPU"
+- `_llm_rows()` also fixed for all modes — CSV export now correct for batch/both/all/all_both
+
+#### Live wall power — generalised across all test pages
+- Video page (`pollJob` + `renderProgress`): now fetches `/power` in parallel with job status, displays live W during measurement
+- LLM page (`pollLLM`, `pollLLMAll`, `renderProgress`): same
+- Image page already had this; video and LLM now match
+
+#### Tapo P110 SessionTimeout fix
+- Root cause: browser-side `/power` polling (new, every 3s) ran concurrently with internal 1s measurement polling, overwhelming the P110's single-session limit
+- Fix: 3-attempt retry with 1s sleep in all four `get_power_watts()` implementations (`main.py`, `video.py`, `llm.py`, `image_gen.py`)
+- Transient session conflicts recover silently within one retry
+
+#### Phase 6 — Public access (GoS1 side complete, pending router + DNS)
+
+**Architecture:**
+```
+Internet → BouyguesBox (forward 80+443) → nginx on GoS1
+  :80  → ACME challenge passthrough + proxy (or redirect to HTTPS once cert live)
+  :443 → reverse proxy to WattLab :8000, /settings blocked 403
+Nextcloud snap → moved to :8080 (off :80)
+```
+
+**GoS1 public IP:** `176.148.88.254`
+
+**Files written:**
+- `infra/wattlab.nginx.conf` — nginx vhost config (HTTP + HTTPS blocks, /settings 403, proxy_pass to :8000, ACME challenge dir)
+- `infra/setup-nginx.sh` — one-shot setup script (run as sudo)
+
+**`/settings` double-blocked:**
+- nginx: `location /settings { return 403; }`
+- FastAPI: `_is_local(request)` checks `Host` header — returns 403 if `greeningofstreaming.org` in host, on both GET and POST
+
+**What's already done (GoS1):**
+- nginx config written and ready at `infra/wattlab.nginx.conf`
+- Setup script ready at `infra/setup-nginx.sh`
+- FastAPI `/settings` block implemented and deployed
+
+### Deferred (noted for next session)
+- **Image page progress bar:** missing elapsed time (video + LLM pages both show it). Standardise elapsed time + live wall power across all three test pages.
+- **GPU image generation:** code is complete and should work (SD-Turbo float16 needs ~2-3 GB VRAM, well within the 11.1 GB available). Just needs a first run to confirm and record the measurement.
+
+---
+
+## Phase 6 — Resumption instructions (for next session)
+
+### Step 1 — Run setup script on GoS1 (needs sudo)
+```bash
+sudo bash /home/gos/wattlab/infra/setup-nginx.sh
+```
+This:
+1. Moves Nextcloud snap from :80 → :8080
+2. Installs nginx + certbot + python3-certbot-nginx
+3. Deploys nginx config to `/etc/nginx/sites-available/wattlab`
+4. Creates symlink in sites-enabled, removes default site
+5. Tests config (`nginx -t`) and starts nginx
+
+After this: Nextcloud accessible at `http://192.168.1.62:8080/` on LAN.
+
+### Step 2 — BouyguesBox port forwarding (do from home)
+Admin panel → port forwarding → add:
+- TCP **80** → `192.168.1.62:80`
+- TCP **443** → `192.168.1.62:443`
+
+**Pre-existing rules to clean up first:** Two old rules were found pointing to `192.168.1.1` (the router itself — initially misread as `192.161.1.1`): one called "apache" forwarding port 80, and one called "ssh" forwarding port 22. Both were left over from the owner's son's personal projects and no longer needed. The port 80 conflict would have silently broken nginx, so delete both before adding the new rules. The active SSH rule (port 2222 → GoS1) is separate and stays.
+
+After this: WattLab reachable at `http://176.148.88.254/` (IP, no DNS needed to test).
+
+### Step 3 — DNS record (wherever greeningofstreaming.org is managed)
+```
+wattlab.greeningofstreaming.org  A  176.148.88.254
+```
+TTL: 300 or lower to propagate fast. May take up to 24-48h.
+
+### Step 4 — Issue SSL cert (once DNS has propagated)
+Verify DNS first:
+```bash
+dig wattlab.greeningofstreaming.org A +short
+# should return 176.148.88.254
+```
+Then issue cert:
+```bash
+sudo certbot --nginx -d wattlab.greeningofstreaming.org
+```
+Then enable HTTPS redirect — edit `/etc/nginx/sites-available/wattlab`, uncomment the `return 301` line and comment out the proxy block in the HTTP server block, then:
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### Step 5 — Update CLAUDE.md
+Add `wattlab.greeningofstreaming.org` to Current URLs section, mark Phase 6 complete.
+
+---
+
 ## Session 1 — 2026-04-03/04
 
 ### What we built

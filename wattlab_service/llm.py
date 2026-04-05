@@ -41,10 +41,16 @@ MODELS = {
 # --- P110 helpers (same as video.py) ---
 
 async def get_power_watts() -> float:
-    client = ApiClient(config["TAPO_EMAIL"], config["TAPO_PASSWORD"])
-    device = await client.p110(config["TAPO_P110_IP"])
-    result = await device.get_energy_usage()
-    return result.current_power / 1000
+    for attempt in range(3):
+        try:
+            client = ApiClient(config["TAPO_EMAIL"], config["TAPO_PASSWORD"])
+            device = await client.p110(config["TAPO_P110_IP"])
+            result = await device.get_energy_usage()
+            return result.current_power / 1000
+        except Exception:
+            if attempt == 2:
+                raise
+            await asyncio.sleep(1)
 
 async def measure_baseline(polls: int = 10) -> float:
     readings = []
