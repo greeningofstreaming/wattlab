@@ -89,7 +89,7 @@ def enqueue(job_id: str, job_type: str, label: str, coro_fn):
     if total >= MAX_QUEUE_DEPTH:
         return None
     position = len(pending_queue) + 1
-    jobs[job_id] = {"stage": "queued", "queue_position": position, "result": None, "error": None}
+    jobs[job_id] = {"stage": "queued", "queue_position": position, "type": job_type, "label": label, "result": None, "error": None}
     pending_queue.append({"job_id": job_id, "type": job_type, "label": label, "coro_fn": coro_fn})
     queue_event.set()
     return position
@@ -134,7 +134,7 @@ _LOGO = (
     f'<span style="color:#444;font-size:0.72rem;font-family:monospace">'
     f'greeningofstreaming.org</span></a>'
 )
-_BACK = '<a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Dashboard</a>'
+_BACK = '<a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Home</a>'
 _FOOTER = f'<footer style="margin-top:3rem;padding-top:1rem;border-top:1px solid #111">{_LOGO}</footer>'
 
 # Confidence flag popover — inject into any page that shows .conf-badge elements.
@@ -726,6 +726,8 @@ async def video_page():
     }}
 
     loadPrevRuns();
+    const _resumeJob = new URLSearchParams(location.search).get('job');
+    if (_resumeJob) { pollJob(_resumeJob, 'both'); }
     </script>
     {_CONF_HELP_WIDGET}
     {_FOOTER}
@@ -1525,6 +1527,8 @@ async def llm_page():
     }}
 
     loadPrevRuns();
+    const _resumeJob = new URLSearchParams(location.search).get('job');
+    if (_resumeJob) { pollLLM(_resumeJob); }
     </script>
     {_CONF_HELP_WIDGET}
     {_FOOTER}
@@ -1648,7 +1652,7 @@ async def queue_status_endpoint():
     running = None
     if current_job_id and current_job_id in jobs:
         j = jobs[current_job_id]
-        running = {"job_id": current_job_id, "stage": j.get("stage")}
+        running = {"job_id": current_job_id, "stage": j.get("stage"), "type": j.get("type"), "label": j.get("label")}
     pending_info = [
         {"job_id": e["job_id"], "type": e["type"], "label": e["label"], "position": i + 1}
         for i, e in enumerate(pending_queue)
@@ -1971,8 +1975,6 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="btn-row">
     <button class="btn btn-primary" onclick="goStep(1)">Start Tour →</button>
-    <a href="/" class="btn btn-secondary" style="text-decoration:none;
-       display:inline-block;line-height:1">← Lab mode</a>
   </div>
 </div>
 
@@ -2204,8 +2206,6 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     <a href="https://greeningofstreaming.org" target="_blank"
        class="btn btn-secondary" style="text-decoration:none;display:inline-block;line-height:1">
       greeningofstreaming.org ↗</a>
-    <a href="/" class="btn btn-secondary"
-       style="text-decoration:none;display:inline-block;line-height:1">Lab mode</a>
   </div>
   <p class="scope-note" style="margin-top:1.5rem">
     Scope: device layer only (GoS1). Network, CDN, CPE excluded.<br>
@@ -3121,6 +3121,8 @@ function renderResult(r) {{
       <p class="scope-note">${{r.scope}}</p>
     </div>`;
 }}
+const _resumeJob = new URLSearchParams(location.search).get('job');
+if (_resumeJob) {{ document.getElementById('run-btn').disabled = true; pollTimer = setInterval(() => pollJob(_resumeJob), 1500); }}
 </script>
     {_CONF_HELP_WIDGET}
     {_FOOTER}
@@ -3184,11 +3186,16 @@ async def queue_page():
     </style>
 </head>
 <body>
-    <a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Dashboard</a>
+    <a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Home</a>
     <h1>Queue</h1>
     <div class="sub">Auto-refreshes every 4s</div>
     <div id="content"><p class="empty">Loading…</p></div>
 <script>
+function resumeLink(type, jobId) {
+    if (!type || !jobId) return '';
+    return ' <a href="/' + type + '?job=' + jobId + '" style="color:#00ff99;font-size:0.75rem;' +
+           'text-decoration:none;margin-left:0.75rem">↩ Resume</a>';
+}
 async function load() {
     const r = await fetch('/queue');
     const q = await r.json();
@@ -3202,12 +3209,14 @@ async function load() {
     if (q.running) {
         html += '<div class="card running">' +
                 '<span class="badge run">▶ RUNNING</span>' +
+                resumeLink(q.running.type, q.running.job_id) +
                 '<div class="label">' + (q.running.label || q.running.job_id) + '</div>' +
                 '<div class="stage">stage: ' + (q.running.stage || '…') + '</div></div>';
     }
     (q.pending || []).forEach((j, i) => {
         html += '<div class="card waiting">' +
                 '<span class="badge wait"># ' + j.position + '</span>' +
+                resumeLink(j.type, j.job_id) +
                 '<div class="label">' + j.label + '</div>' +
                 '<div class="stage">waiting</div></div>';
     });
