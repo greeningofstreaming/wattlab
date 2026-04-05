@@ -13,6 +13,7 @@ from sources import get_all_sources, PRELOADED
 from llm import run_llm_measurement, run_llm_batch_measurement, run_llm_both_measurement, MODELS, TASKS
 from persist import save_result, list_results, load_result, to_csv
 from image_gen import run_image_measurement, run_image_both_measurement, IMAGE_STEPS_CPU, IMAGE_STEPS_GPU, GPU_BATCH_SIZE
+import rag as rag_module
 import settings as cfg
 
 config = dotenv_values("/home/gos/wattlab/.env")
@@ -98,6 +99,8 @@ def enqueue(job_id: str, job_type: str, label: str, coro_fn):
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(queue_worker())
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, rag_module.check_index)
 
 
 async def queue_worker():
@@ -223,6 +226,7 @@ async def index():
         <a href="/video">▶ Video transcode test</a>
         <a href="/llm">▶ LLM inference test</a>
         <a href="/image">▶ Image generation test</a>
+        <a href="/rag">▶ RAG energy test</a>
         <a href="/demo">◆ Guided Tour</a>
         <a href="/queue-status">⏱ Queue</a>
         <a href="/settings">⚙ Settings</a>
@@ -1662,6 +1666,447 @@ async def queue_status_endpoint():
         "running": running,
         "pending": pending_info,
     }
+
+
+# --- RAG page and endpoints ---
+
+@app.get("/rag", response_class=HTMLResponse)
+async def rag_page():
+    models_html = "".join([
+        f'''<div class="preset" id="rmodel-{k}" onclick="selectRModel('{k}')">
+            <h3>{v["label"]}</h3>
+            <p style="color:#555;font-size:0.75rem">{v["params"]} · {v["size"]}</p>
+        </div>'''
+        for k, v in rag_module.MODELS.items()
+    ])
+
+    queue_depth = len(pending_queue) + (1 if current_job_id else 0)
+    busy_banner = (f'<div style="background:#333;color:#ffaa00;padding:0.75rem 1rem;'
+                   f'margin-bottom:1rem;font-size:0.85rem">'
+                   f'⏱ {queue_depth} job{"s" if queue_depth != 1 else ""} in queue — '
+                   f'yours will be added and run automatically.</div>') \
+        if queue_depth > 0 else ""
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>WattLab — RAG Energy Test</title>
+    <style>
+        * {{ box-sizing:border-box; margin:0; padding:0; }}
+        body {{ font-family:monospace; background:#0a0a0a; color:#e0e0e0;
+               max-width:780px; margin:0 auto; padding:2rem; }}
+        h1 {{ color:#00ff99; margin-bottom:0.25rem; font-size:1.6rem; }}
+        .subtitle {{ color:#555; font-size:0.8rem; margin-bottom:1.5rem; }}
+        .info {{ color:#777; font-size:0.82rem; margin-bottom:1.5rem;
+                 border-left:2px solid #222; padding-left:1rem; line-height:1.6; }}
+        .presets {{ display:flex; gap:0.75rem; margin-bottom:1.5rem; }}
+        .preset {{ border:1px solid #333; padding:1rem; cursor:pointer; flex:1; }}
+        .preset:hover {{ border-color:#00ff9966; }}
+        .preset.selected {{ border-color:#00ff99; background:#00ff9911; }}
+        .preset h3 {{ color:#00ff99; font-size:0.9rem; margin-bottom:0.4rem; }}
+        .section-label {{ color:#555; font-size:0.75rem; text-transform:uppercase;
+                          letter-spacing:0.05em; margin-bottom:0.75rem; }}
+        button {{ background:#00ff99; color:#000; border:none; padding:0.75rem 2rem;
+                  cursor:pointer; font-family:monospace; font-size:1rem; margin-top:1rem; }}
+        button:disabled {{ background:#222; color:#555; cursor:not-allowed; }}
+        button:hover:not(:disabled) {{ background:#00dd88; }}
+        #status {{ margin-top:1.5rem; }}
+        .result-box {{ border:1px solid #222; padding:1.5rem; }}
+        .result-box h2 {{ color:#00ff99; font-size:1.1rem; margin-bottom:1rem;
+                          padding-bottom:0.5rem; border-bottom:1px solid #222; }}
+        .metric {{ display:flex; justify-content:space-between;
+                   padding:0.3rem 0; border-bottom:1px solid #111; font-size:0.82rem; }}
+        .val {{ color:#00ff99; }}
+        .section-title {{ color:#444; font-size:0.72rem; text-transform:uppercase;
+                          letter-spacing:0.05em; margin:0.75rem 0 0.4rem; }}
+        .response-box {{ background:#111; padding:1rem; margin-top:0.75rem;
+                         font-size:0.8rem; color:#aaa; line-height:1.6;
+                         border-left:2px solid #00ff9944; max-height:500px;
+                         overflow-y:auto; white-space:pre-wrap; }}
+        .scope-note {{ color:#333; font-size:0.72rem; margin-top:1rem; }}
+        .progress-box {{ border:1px solid #222; padding:1.5rem; }}
+        .progress-header {{ color:#ffaa00; font-size:0.9rem; margin-bottom:1rem; }}
+        textarea {{ background:#111; border:1px solid #333; color:#e0e0e0;
+                    font-family:monospace; font-size:0.88rem; padding:0.75rem;
+                    width:100%; resize:vertical; line-height:1.5; }}
+        textarea:focus {{ border-color:#00ff9966; outline:none; }}
+        .mode-card {{ border:1px solid #333; padding:0.75rem 1rem; cursor:pointer;
+                      flex:1; transition:border-color 0.15s; }}
+        .mode-card:hover {{ border-color:#00ff9966; }}
+        .mode-card.selected {{ border-color:#00ff99; background:#00ff9911; }}
+        .mode-card h4 {{ color:#00ff99; font-size:0.85rem; margin-bottom:0.2rem; }}
+        .mode-card p {{ color:#555; font-size:0.75rem; }}
+        .index-bar {{ border:1px solid #1a1a1a; padding:0.75rem 1rem;
+                      font-size:0.8rem; color:#555; margin-bottom:1.5rem;
+                      display:flex; align-items:center; justify-content:space-between; gap:1rem; }}
+        .index-dot {{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }}
+    </style>
+</head>
+<body>
+    {_BACK}
+    {busy_banner}
+    <h1>RAG Energy Test</h1>
+    <div class="subtitle">Greening of Streaming · WattLab · GoS1</div>
+    <div class="info">
+        Retrieval-Augmented Generation (RAG) augments an LLM with chunks from a PDF corpus.<br>
+        Compare baseline (no retrieval), RAG (top 3 chunks), and RAG-large (top 8 chunks).<br>
+        Scope: device layer only — no network, no amortised training cost.
+    </div>
+
+    <div class="index-bar">
+        <div style="display:flex;align-items:center;gap:0.6rem">
+            <div class="index-dot" id="index-dot" style="background:#333"></div>
+            <span id="index-status-text">Checking index…</span>
+        </div>
+        <div style="display:flex;gap:0.5rem">
+            <button id="buildBtn" onclick="buildIndex(false)"
+                    style="background:none;border:1px solid #333;color:#555;
+                           font-size:0.75rem;padding:0.3rem 0.75rem;cursor:pointer;
+                           font-family:monospace;margin-top:0">Build index</button>
+            <button id="rebuildBtn" onclick="buildIndex(true)"
+                    style="background:none;border:1px solid #333;color:#555;
+                           font-size:0.75rem;padding:0.3rem 0.75rem;cursor:pointer;
+                           font-family:monospace;margin-top:0">Rebuild</button>
+        </div>
+    </div>
+
+    <div class="section-label">Model</div>
+    <div class="presets">{models_html}</div>
+
+    <div class="section-label">Retrieval mode</div>
+    <div class="presets" style="margin-bottom:1.5rem">
+        <div class="mode-card selected" id="rmode-baseline" onclick="selectRMode('baseline')">
+            <h4>Baseline</h4>
+            <p>No retrieval. Cold LLM inference only.</p>
+        </div>
+        <div class="mode-card" id="rmode-rag" onclick="selectRMode('rag')">
+            <h4>RAG</h4>
+            <p>Top 3 chunks · 4096 ctx</p>
+        </div>
+        <div class="mode-card" id="rmode-rag_large" onclick="selectRMode('rag_large')">
+            <h4>RAG Large</h4>
+            <p>Top 8 chunks · 8192 ctx</p>
+        </div>
+    </div>
+
+    <div class="section-label">Question</div>
+    <textarea id="questionText" rows="3"
+              placeholder="e.g. What is the energy cost of video streaming per GB transferred?"
+              style="margin-bottom:1.5rem"></textarea>
+
+    <button id="runBtn" onclick="startRag()">▶ Run measurement</button>
+
+    <div id="status"></div>
+
+    <div id="prev-runs" style="margin-top:2.5rem"></div>
+
+    <script>
+    let selectedRModel = 'tinyllama';
+    let selectedRMode = 'baseline';
+    let ragTimer = null;
+    let ragStartTime = null;
+
+    function selectRModel(k) {{
+        document.querySelectorAll('.presets .preset').forEach(el => el.classList.remove('selected'));
+        const el = document.getElementById('rmodel-' + k);
+        if (el) el.classList.add('selected');
+        selectedRModel = k;
+    }}
+    function selectRMode(m) {{
+        document.querySelectorAll('.mode-card').forEach(el => el.classList.remove('selected'));
+        const el = document.getElementById('rmode-' + m);
+        if (el) el.classList.add('selected');
+        selectedRMode = m;
+    }}
+    selectRModel('tinyllama');
+
+    // Index status
+    async function loadIndexStatus() {{
+        try {{
+            const r = await fetch('/rag/index-status');
+            const d = await r.json();
+            const dot = document.getElementById('index-dot');
+            const txt = document.getElementById('index-status-text');
+            if (d.status === 'ready') {{
+                dot.style.background = '#00ff99';
+                txt.textContent = 'Index ready · ' + d.doc_count + ' chunks';
+            }} else if (d.status === 'building') {{
+                dot.style.background = '#ffaa00';
+                txt.textContent = 'Building index…';
+                setTimeout(loadIndexStatus, 3000);
+            }} else if (d.status === 'error') {{
+                dot.style.background = '#ff4400';
+                txt.textContent = 'Index error: ' + (d.error || 'unknown');
+            }} else {{
+                dot.style.background = '#555';
+                txt.textContent = 'Index not built — click "Build index" to start';
+            }}
+        }} catch(e) {{
+            document.getElementById('index-status-text').textContent = 'Could not check index';
+        }}
+    }}
+
+    async function buildIndex(rebuild) {{
+        const btn = rebuild ? document.getElementById('rebuildBtn') : document.getElementById('buildBtn');
+        btn.disabled = true;
+        btn.textContent = 'Working…';
+        document.getElementById('index-dot').style.background = '#ffaa00';
+        document.getElementById('index-status-text').textContent = 'Building index…';
+        try {{
+            await fetch('/rag/build-index', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{rebuild: rebuild}})
+            }});
+        }} catch(e) {{}}
+        btn.disabled = false;
+        btn.textContent = rebuild ? 'Rebuild' : 'Build index';
+        setTimeout(loadIndexStatus, 2000);
+    }}
+
+    function formatElapsed(ms) {{
+        const s = Math.floor(ms / 1000);
+        if (s < 60) return s + 's';
+        return Math.floor(s/60) + 'm ' + (s%60) + 's';
+    }}
+
+    async function startRag() {{
+        const question = document.getElementById('questionText').value.trim();
+        if (!question) {{
+            document.getElementById('status').innerHTML =
+                '<div style="color:#ff4400;font-size:0.85rem;margin-top:1rem">Please enter a question.</div>';
+            return;
+        }}
+        document.getElementById('runBtn').disabled = true;
+        ragStartTime = Date.now();
+        const form = new FormData();
+        form.append('model_key', selectedRModel);
+        form.append('rag_mode', selectedRMode);
+        form.append('question', question);
+        try {{
+            const resp = await fetch('/rag/run', {{method:'POST', body:form}});
+            const data = await resp.json();
+            if (data.job_id) {{
+                renderRagProgress('baseline');
+                pollRag(data.job_id);
+            }} else {{
+                document.getElementById('status').innerHTML =
+                    '<div style="color:#ff4400">Error: ' + JSON.stringify(data) + '</div>';
+                document.getElementById('runBtn').disabled = false;
+            }}
+        }} catch(e) {{
+            document.getElementById('status').innerHTML =
+                '<div style="color:#ff4400">Failed: ' + e + '</div>';
+            document.getElementById('runBtn').disabled = false;
+        }}
+    }}
+
+    function renderRagProgress(stage) {{
+        const stages = [
+            {{id:'baseline', label:'Baseline poll (10s)'}},
+            {{id:'inference', label:'Inference running'}},
+            {{id:'done',      label:'Complete'}},
+        ];
+        const stageOrder = stages.map(s => s.id);
+        const cur = stageOrder.indexOf(stage);
+        const stagesHtml = stages.map((s, i) => {{
+            const cls = i < cur ? 'done' : i === cur ? 'active' : 'pending';
+            const icon = cls === 'done' ? '✓' : cls === 'active' ? '●' : '○';
+            const col  = cls === 'done' ? '#00ff99' : cls === 'active' ? '#ffaa00' : '#333';
+            return `<div style="display:flex;align-items:center;gap:0.6rem;font-size:0.82rem;margin-bottom:0.3rem">
+                <span style="color:${{col}}">${{icon}}</span>
+                <span style="color:${{col}}">${{s.label}}</span></div>`;
+        }}).join('');
+        document.getElementById('status').innerHTML = `
+            <div class="progress-box">
+                <div class="progress-header">Measuring RAG energy — do not close this tab</div>
+                ${{stagesHtml}}
+                <div style="color:#444;font-size:0.78rem;margin-top:0.75rem">
+                    Elapsed: ${{ragStartTime ? formatElapsed(Date.now()-ragStartTime) : '0s'}}</div>
+            </div>`;
+    }}
+
+    async function pollRag(jobId) {{
+        try {{
+            const resp = await fetch('/rag/job/' + jobId);
+            const data = await resp.json();
+            if (data.stage === 'done' && data.result) {{
+                if (ragTimer) {{ clearTimeout(ragTimer); ragTimer = null; }}
+                renderRagResult(data.result, jobId);
+                document.getElementById('runBtn').disabled = false;
+                loadPrevRuns();
+            }} else if (data.stage === 'error' || data.error) {{
+                if (ragTimer) {{ clearTimeout(ragTimer); ragTimer = null; }}
+                document.getElementById('status').innerHTML =
+                    '<div style="color:#ff4400">Error: ' + (data.error||'unknown') + '</div>';
+                document.getElementById('runBtn').disabled = false;
+            }} else if (data.stage === 'queued') {{
+                document.getElementById('status').innerHTML =
+                    '<div style="border:1px solid #333;padding:1.5rem">' +
+                    '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">⏱ Queued — position ' + data.queue_position + '</div>' +
+                    '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>' +
+                    '</div>';
+                ragTimer = setTimeout(() => pollRag(jobId), 3000);
+            }} else {{
+                renderRagProgress(data.stage || 'baseline');
+                ragTimer = setTimeout(() => pollRag(jobId), 2000);
+            }}
+        }} catch(e) {{
+            ragTimer = setTimeout(() => pollRag(jobId), 5000);
+        }}
+    }}
+
+    function renderRagResult(r, jobId) {{
+        const e = r.energy || {{}};
+        const inf = r.inference || {{}};
+        const conf = e.confidence || {{}};
+        const ragModeLabels = {{baseline:'Baseline (no retrieval)', rag:'RAG (top 3)', rag_large:'RAG Large (top 8)'}};
+        const sourcesHtml = r.chunk_sources && r.chunk_sources.length
+            ? r.chunk_sources.map(s => `<span style="font-size:0.72rem;color:#555;
+                background:#111;padding:0.2rem 0.4rem;margin-right:0.3rem">${{s}}</span>`).join('')
+            : '<span style="color:#333;font-size:0.75rem">none</span>';
+        const retrievalHtml = r.rag_mode !== 'baseline' ? `
+            <div class="section-title">Retrieval</div>
+            <div class="metric"><span>Chunks retrieved</span><span class="val">${{r.chunks_retrieved}} / ${{r.top_k}}</span></div>
+            <div class="metric"><span>Embedding</span><span class="val">${{r.embedding_ms}} ms</span></div>
+            <div class="metric"><span>Vector search</span><span class="val">${{r.retrieval_ms}} ms</span></div>
+            <div class="metric"><span>Context window</span><span class="val">${{r.num_ctx}} tokens</span></div>
+            <div class="section-title" style="margin-top:0.75rem">Sources</div>
+            <div style="margin-bottom:0.5rem">${{sourcesHtml}}</div>
+        ` : '';
+        document.getElementById('status').innerHTML = `
+            <div class="result-box">
+                <h2>Result — ${{r.model_label}} · ${{ragModeLabels[r.rag_mode] || r.rag_mode}}</h2>
+                <div class="section-title">Question</div>
+                <div style="color:#aaa;font-size:0.82rem;margin-bottom:0.75rem">${{r.question}}</div>
+                ${{retrievalHtml}}
+                <div class="section-title">Inference</div>
+                <div class="metric"><span>Output tokens</span><span class="val">${{inf.output_tokens}}</span></div>
+                <div class="metric"><span>Tokens/sec</span><span class="val">${{inf.tokens_per_sec}}</span></div>
+                <div class="metric"><span>Duration</span><span class="val">${{inf.duration_s}} s</span></div>
+                <div class="section-title">Energy</div>
+                <div class="metric"><span>Baseline</span><span class="val">${{e.w_base}} W</span></div>
+                <div class="metric"><span>Task mean</span><span class="val">${{e.w_task}} W</span></div>
+                <div class="metric"><span>ΔW</span><span class="val">${{e.delta_w}} W</span></div>
+                <div class="metric"><span>ΔE</span><span class="val">${{e.delta_e_wh}} Wh</span></div>
+                <div class="metric"><span>mWh/token</span><span class="val">${{e.mwh_per_token ?? '—'}}</span></div>
+                <div class="metric"><span>Confidence</span>
+                    <span class="val conf-badge">${{conf.flag||'—'}} ${{conf.label||''}}</span></div>
+                <div class="section-title">Answer</div>
+                <div class="response-box">${{inf.response}}</div>
+                <div class="scope-note">${{r.scope}}</div>
+                <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
+                    <a href="/results/llm/${{jobId}}/download.json" download
+                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ JSON</a>
+                    <a href="/results/llm/${{jobId}}/download.csv" download
+                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ CSV</a>
+                </div>
+            </div>`;
+    }}
+
+    async function loadPrevRuns() {{
+        try {{
+            const resp = await fetch('/results/llm/list');
+            const runs = await resp.json();
+            // Filter to RAG runs only
+            const ragRuns = runs.filter(r => r.task && r.task.startsWith('RAG/'));
+            renderPrevRuns(ragRuns);
+        }} catch(e) {{}}
+    }}
+
+    function renderPrevRuns(runs) {{
+        const el = document.getElementById('prev-runs');
+        if (!runs || runs.length === 0) {{
+            el.innerHTML = '<div style="color:#333;font-size:0.8rem">No previous RAG runs.</div>';
+            return;
+        }}
+        const rows = runs.map(r => {{
+            const date = r.saved_at ? r.saved_at.slice(0,16).replace('T',' ') : '—';
+            const summary = `${{r.model||''}} · ${{r.task||''}} · ${{r.mwh_per_token}} mWh/tok · ${{r.tokens_per_sec}} tok/s ${{r.confidence||''}}`;
+            const base = '/results/llm/' + r.job_id;
+            return `<div style="border-bottom:1px solid #111;padding:0.6rem 0">
+                <div style="display:flex;justify-content:space-between;align-items:baseline">
+                    <span style="color:#e0e0e0;font-size:0.82rem">${{date}}</span>
+                    <span style="color:#555;font-size:0.75rem;font-family:monospace">${{r.job_id}}</span>
+                </div>
+                <div style="color:#00ff99;font-size:0.8rem;margin:0.2rem 0">${{summary}}</div>
+                <div style="display:flex;gap:0.5rem;margin-top:0.3rem">
+                    <a href="${{base}}/download.json" download
+                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ JSON</a>
+                    <a href="${{base}}/download.csv" download
+                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ CSV</a>
+                </div>
+            </div>`;
+        }}).join('');
+        el.innerHTML = `<div style="color:#444;font-size:0.72rem;text-transform:uppercase;
+            letter-spacing:0.05em;margin-bottom:0.75rem">Previous RAG runs</div>${{rows}}`;
+    }}
+
+    loadIndexStatus();
+    loadPrevRuns();
+    const _resumeJob = new URLSearchParams(location.search).get('job');
+    if (_resumeJob) {{ pollRag(_resumeJob); }}
+    </script>
+    {_CONF_HELP_WIDGET}
+    {_FOOTER}
+</body>
+</html>"""
+
+
+@app.get("/rag/index-status")
+async def rag_index_status():
+    return {{
+        "status": rag_module.index_status,
+        "doc_count": rag_module.index_doc_count,
+        "error": rag_module.index_error,
+    }}
+
+
+@app.post("/rag/build-index")
+async def rag_build_index(request: Request):
+    body = await request.json()
+    rebuild = bool(body.get("rebuild", False))
+    if rag_module.index_status == "building":
+        return {{"status": "already_building"}}
+    loop = asyncio.get_event_loop()
+    asyncio.create_task(loop.run_in_executor(None, lambda: rag_module.build_index(rebuild)))
+    return {{"status": "started"}}
+
+
+@app.post("/rag/run")
+async def rag_run(
+    model_key: str = Form(...),
+    rag_mode: str = Form(...),
+    question: str = Form(...),
+):
+    if model_key not in rag_module.MODELS:
+        return JSONResponse({{"error": "Invalid model"}}, status_code=400)
+    if rag_mode not in ("baseline", "rag", "rag_large"):
+        return JSONResponse({{"error": "Invalid rag_mode"}}, status_code=400)
+    if not question.strip():
+        return JSONResponse({{"error": "Question required"}}, status_code=400)
+    if rag_mode != "baseline" and rag_module.index_status != "ready":
+        return JSONResponse({{"error": "Index not ready — build it first"}}, status_code=400)
+
+    job_id = str(uuid.uuid4())[:8]
+    mode_labels = {{"baseline": "Baseline", "rag": "RAG", "rag_large": "RAG Large"}}
+    label = f"RAG — {{rag_module.MODELS[model_key]['label']}} · {{mode_labels[rag_mode]}}"
+
+    async def coro():
+        jobs[job_id]["stage"] = "baseline"
+        result = await rag_module.run_rag_measurement(model_key, rag_mode, question.strip(), jobs, job_id)
+        save_result("llm", job_id, result)
+        jobs[job_id] = {{"stage": "done", "result": result}}
+
+    position = enqueue(job_id, "rag", label, coro)
+    if position is None:
+        return JSONResponse({{"error": "Queue full — try again later."}}, status_code=429)
+    return {{"job_id": job_id, "queue_position": position}}
+
+
+@app.get("/rag/job/{{job_id}}")
+async def rag_job_status(job_id: str):
+    return jobs.get(job_id, {{"status": "not_found"}})
 
 
 # --- Results: list, JSON download, CSV download ---

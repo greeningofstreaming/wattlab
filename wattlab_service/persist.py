@@ -124,10 +124,18 @@ def _summarise(job_type: str, data: dict) -> dict:
             summary["delta_e_wh"] = e.get("delta_e_wh")
             summary["duration_s"] = e.get("delta_t_s")
             summary["confidence"] = e.get("confidence", {}).get("flag")
-    else:  # llm
+    else:  # llm (including rag)
         mode = data.get("mode", "single")
         summary["model"] = data.get("model_label")
-        if mode == "all":
+        if mode == "rag":
+            summary["task"] = f"RAG/{data.get('rag_mode', 'baseline')}"
+            e = data.get("energy", {})
+            i = data.get("inference", {})
+            summary["mwh_per_token"] = e.get("mwh_per_token")
+            summary["tokens_per_sec"] = i.get("tokens_per_sec")
+            summary["confidence"] = e.get("confidence", {}).get("flag")
+            return summary
+        elif mode == "all":
             summary["task"] = "T1+T2+T3"
             t3 = data.get("tasks", {}).get("T3", {})
             e = t3.get("energy", {})
@@ -260,6 +268,12 @@ def _llm_rows(data: dict) -> list:
                              tr.get("inference", {}), tr.get("energy", {}),
                              tr.get("thermals", {})))
         return rows
+    elif mode == "rag":
+        e = data.get("energy", {})
+        i = data.get("inference", {})
+        t = data.get("thermals", {})
+        label = f"RAG/{data.get('rag_mode','')} — {data.get('question','')[:50]}"
+        return [_row(label, i, e, t)]
     elif mode == "batch":
         rows = []
         t = data.get("thermals", {})

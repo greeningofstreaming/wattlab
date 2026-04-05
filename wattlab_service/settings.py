@@ -12,6 +12,8 @@ DEFAULTS = {
     "conf_green_polls": 10,
     "conf_yellow_delta_w": 2.0,
     "conf_yellow_polls": 5,
+    "rag_corpus_path": "/home/gos/wattlab/corpus/papers",
+    "rag_chroma_path": "/home/gos/wattlab/.chroma",
 }
 
 
