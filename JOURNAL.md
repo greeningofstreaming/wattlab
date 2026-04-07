@@ -7,6 +7,93 @@ Scope: device layer only (GoS1). Network, CDN, and CPE explicitly excluded.
 
 ---
 
+## Session 10 — 2026-04-07
+
+### What we did
+
+**Video upload fix · Centralized power cache · FFmpeg audit · Home nav restructure · Meeting debrief**
+
+#### Video upload 413 fix
+- nginx `client_max_body_size` was defaulting to 1MB — any upload over that returned a 413 HTML error page, which the JS tried to parse as JSON → `SyntaxError: Unexpected token '<'`
+- Added `client_max_body_size 2g` to the HTTP server block in `infra/wattlab.nginx.conf` (and to the commented HTTPS block for when SSL goes live)
+- Root cause of "fix didn't work first time": `systemctl reload nginx` does a graceful restart — old workers (from Apr 05) kept running with the old 1MB config. Required `systemctl restart nginx` to kill all workers and spawn fresh ones with the new config.
+- JS error message improved: now context-aware — only shows "file too large (nginx limit)" when it was actually an upload AND actually a 413. Other failures show `Failed (HTTP NNN)` without the misleading hint.
+
+#### Centralized power cache
+- Previously every browser session independently polled the P110 every 10s on page load and every 3–5s during measurement display. Multiple simultaneous users saw different wattage values and the P110 was hammered concurrently.
+- Added `_power_cache: dict` global and `power_poller()` background coroutine (started at app startup alongside `queue_worker()`). Polls P110 every 5s, updates cache. On transient errors, stale value is kept.
+- `/power` endpoint now returns from cache (dict read, no I/O). Home page reads from cache on page load — no direct P110 call on HTTP request path.
+- Measurement workers (`video.py`, `llm.py`, etc.) still poll P110 directly at 1s intervals — measurement accuracy unchanged.
+- Result: all browser sessions see the same value; P110 is polled at a steady 5s cadence regardless of how many users are connected.
+
+#### FFmpeg command in result JSON and UI
+- `transcode()` in `video.py` now returns `ffmpeg_cmd` (the full command string including `nice -n -5`) in the result dict.
+- Surfaced in the result card (single and both modes) as a collapsible `▶ ffmpeg command` disclosure element under the Encode section.
+- Addresses the Stan/meeting question: "what exactly is happening to the input file?" — the exact command is now visible and saved in the result JSON for auditability and reproducibility.
+- Note: only new runs (post this session) will have the field. Old saved results show nothing for the ffmpeg section.
+
+#### GPU PPT explanatory note
+- GPU self-reported power (PPT from `amdgpu PPT power1_average`) was already captured and shown in result cards, but the discrepancy with P110 ΔW was confusing (meeting: "GPU reported 44W but P110 delta showed 85W — why?").
+- Added a one-line note beneath the PPT row in single and both-mode result cards: *"GPU self-reported power (PPT). P110 ΔW above is the full system delta — includes CPU, RAM, drives."*
+
+#### Home nav restructure
+- Video promoted to its own full-width row beneath Guided Tour.
+- Image / LLM / RAG grouped under a dim "AI WORKLOADS" label in a secondary row.
+- Queue / Settings demoted to a utility row (smallest, dimmest).
+- Reflects meeting consensus: GoS's core story is video transcoding; AI workloads are secondary.
+
+#### DNS situation
+- DNS table was wiped during Wix ownership transfer from Dom to Ben.
+- `wattlab.greeningofstreaming.org` A record needs to be re-added once DNS is rebuilt.
+- In the meantime, `http://176.148.88.254` (public IP, no DNS needed) is working and was used for the dry run.
+- SSL cert deferred until DNS is restored.
+
+#### Meeting debrief (WattLab Monthly, Apr 07)
+Attendees: Ben, Stan (IABM), Barbara Lange, Carl (Akamai). Key feedback:
+
+**Methodology gaps raised by Stan:**
+- FFmpeg pipeline: does it decode to baseband? What intermediate format? → Fixed (ffmpeg command now logged).
+- Apples-to-apples: all presets must use comparable profiles (same bitrate target, GOP, profile level). Currently undocumented beyond the command string. To follow up with Tanya/Simon.
+
+**GPU PPT vs P110 delta (~18min):**
+- GPU self-reported ~44W, P110 system delta ~85W during GPU encode. Explained: CPU also active during GPU encode (loading/sending data). Added explanatory note to UI.
+
+**CPU heats more under GPU load than CPU load:**
+- Unexplained observation from the demo. Hypothesis: CPU handles memory transfers for GPU. To investigate.
+
+**Audio measurement question:**
+- Can we measure the energy impact of audio volume? Ben tested informally (TV plug, full vs min volume) — delta within P110 noise floor (~1W on a 50–200W device). Stan will contact an audio expert (AES Canada chapter).
+
+**Image gen and LLM scope:**
+- Stan and Ben agreed these are off-brand as primary features. Moved to "AI workloads" secondary section in nav.
+
+**Public access:**
+- Upload worked for all testers once the 413 fix was deployed.
+- Barbara confirmed settings page was read-only (by design).
+- Queue worked correctly under concurrent load.
+
+**Confidence flags:**
+- Ben wants a working session with Tanya to make the thresholds more statistically rigorous.
+
+**Deferred / action items from meeting:**
+- CPU temp under GPU load: investigate and document
+- Transcoding profile documentation (apples-to-apples): work with Simon/Tanya
+- Audio measurement: Stan to contact audio expert
+- DNS rebuild: whenever Dom/Ben can access DNS panel
+- SSL cert: after DNS
+- Akamai meeting rescheduled: Apr 23, 3pm UK, Simon to be invited
+
+### Deferred (carried forward)
+- DNS + SSL (blocked on DNS rebuild)
+- GPU image generation: first clean measurement run
+- Image page elapsed time in progress bar
+- phi4 (14B): `ollama pull phi4` — for RAG quality comparison
+- Confidence threshold refinement: working session with Tanya
+- Transcoding profile documentation (apples-to-apples across H.264/H.265/AV1)
+- CPU temp under GPU load: investigation
+
+---
+
 ## Session 9 — 2026-04-06
 
 ### What we did
@@ -50,7 +137,7 @@ New three-tier layout (mobile-friendly, `flex-wrap` on all rows):
 - **RAG Internal Server Error** (prior session): `{{}}` double-brace escaping used in plain Python functions (not f-strings) → `unhashable type: dict`. Fixed by removing double-braces from all endpoint functions.
 
 ### Deferred
-- DNS A record + SSL cert (after Easter, pending Wix admin access)
+- DNS: table lost during Wix ownership transfer (Dom → Ben). A record `wattlab.greeningofstreaming.org → 176.148.88.254` needs to be re-added once DNS is rebuilt. SSL cert follows after that.
 - GPU image generation: first clean measurement run still needed
 - Image page elapsed time in progress bar
 - phi4 (14B): `ollama pull phi4` (9.1GB) — for RAG quality comparison

@@ -77,6 +77,19 @@ async def gate_submit(request: Request, password: str = Form(...), next: str = F
     return RedirectResponse(url=f"/gate?next={next}&error=1", status_code=302)
 jobs = {}
 
+# --- Power cache ---
+# Single background loop updates this every 5s. All /power reads come from here,
+# so multiple browser sessions don't each independently hammer the P110.
+_power_cache: dict = {"watts": None}
+
+async def power_poller():
+    while True:
+        try:
+            _power_cache["watts"] = await get_power_watts()
+        except Exception:
+            pass  # keep stale value on transient errors
+        await asyncio.sleep(5)
+
 # --- Queue ---
 pending_queue = []          # list of {"job_id", "type", "label", "coro_fn"}
 queue_event = asyncio.Event()
@@ -99,6 +112,7 @@ def enqueue(job_id: str, job_type: str, label: str, coro_fn):
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(queue_worker())
+    asyncio.create_task(power_poller())
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, rag_module.check_index)
 
@@ -245,7 +259,8 @@ async def get_power_watts() -> float:
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    watts = await get_power_watts()
+    watts = _power_cache["watts"]
+    watts_str = f"{watts:.1f}" if watts is not None else "—"
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -255,40 +270,48 @@ async def index():
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{ font-family: monospace; background: #0a0a0a; color: #e0e0e0;
                display: flex; flex-direction: column; align-items: center;
-               justify-content: center; height: 100vh; }}
+               justify-content: center; min-height: 100vh; padding: 2rem 1rem; }}
         .watts {{ font-size: 6rem; color: #00ff99; font-weight: bold; }}
         .label {{ font-size: 1.2rem; color: #888; margin-top: 1rem; }}
         .scope {{ font-size: 0.8rem; color: #444; margin-top: 0.5rem; }}
-        .nav {{ margin-top: 3rem; display: flex; flex-direction: column; align-items: center; gap: 1rem; width: 100%; max-width: 600px; }}
+        .nav {{ margin-top: 3rem; display: flex; flex-direction: column; align-items: center;
+                gap: 1.25rem; width: 100%; max-width: 600px; }}
+        .nav-label {{ font-size: 0.65rem; color: #333; letter-spacing: 0.1em;
+                      text-transform: uppercase; margin-bottom: -0.5rem; }}
         .nav-tour a {{ color: #0a0a0a; background: #00ff99; text-decoration: none;
                        padding: 0.6rem 2.5rem; font-size: 1rem; font-weight: bold;
                        display: inline-block; }}
         .nav-tour a:hover {{ background: #00cc77; }}
-        .nav-primary {{ display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: center; }}
-        .nav-primary a {{ color: #00ff99; text-decoration: none;
-                          border: 1px solid #00ff99; padding: 0.5rem 1.25rem;
-                          font-size: 0.95rem; }}
-        .nav-primary a:hover {{ background: #00ff9922; }}
-        .nav-secondary {{ display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }}
-        .nav-secondary a {{ color: #666; text-decoration: none;
-                            border: 1px solid #333; padding: 0.35rem 0.9rem;
-                            font-size: 0.8rem; }}
-        .nav-secondary a:hover {{ color: #aaa; border-color: #555; }}
+        .nav-video a {{ color: #00ff99; text-decoration: none;
+                        border: 1px solid #00ff99; padding: 0.55rem 2rem;
+                        font-size: 1rem; display: inline-block; }}
+        .nav-video a:hover {{ background: #00ff9922; }}
+        .nav-ai {{ display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }}
+        .nav-ai a {{ color: #888; text-decoration: none;
+                     border: 1px solid #2a2a2a; padding: 0.4rem 1rem;
+                     font-size: 0.85rem; }}
+        .nav-ai a:hover {{ color: #ccc; border-color: #444; }}
+        .nav-util {{ display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }}
+        .nav-util a {{ color: #444; text-decoration: none;
+                       border: 1px solid #1a1a1a; padding: 0.3rem 0.75rem;
+                       font-size: 0.75rem; }}
+        .nav-util a:hover {{ color: #777; border-color: #333; }}
     </style>
 </head>
 <body>
-    <div class="watts">{watts:.1f} W</div>
+    <div class="watts">{watts_str} W</div>
     <div class="label">GoS1 current power draw</div>
     <div class="scope">Device layer only · Tapo P110 · refreshes every 10s</div>
     <div class="nav">
         <div class="nav-tour"><a href="/demo">◆ Guided Tour</a></div>
-        <div class="nav-primary">
-            <a href="/video">▶ Video transcode</a>
-            <a href="/image">▶ Image generation</a>
-            <a href="/llm">▶ LLM inference</a>
-        </div>
-        <div class="nav-secondary">
+        <div class="nav-video"><a href="/video">▶ Video transcode</a></div>
+        <div class="nav-label">AI workloads</div>
+        <div class="nav-ai">
+            <a href="/image">Image generation</a>
+            <a href="/llm">LLM inference</a>
             <a href="/rag">RAG energy test</a>
+        </div>
+        <div class="nav-util">
             <a href="/queue-status">⏱ Queue</a>
             <a href="/settings">⚙ Settings</a>
         </div>
@@ -299,8 +322,7 @@ async def index():
 
 @app.get("/power")
 async def power_json():
-    watts = await get_power_watts()
-    return {"watts": watts, "scope": "device_only", "source": "tapo_p110"}
+    return {"watts": _power_cache["watts"], "scope": "device_only", "source": "tapo_p110"}
 
 # --- Video page ---
 
@@ -547,8 +569,10 @@ async def video_page():
         const status = document.getElementById('status');
 
         let resp;
+        let isUpload = false;
         try {{
             if (selectedSource === 'upload') {{
+                isUpload = true;
                 const file = document.getElementById('fileInput').files[0];
                 if (!file) {{ alert('Please select a file first'); btn.disabled = false; return; }}
                 if (file.size > 1024 * 1024 * 1024) {{ alert('File too large (max 1GB)'); btn.disabled = false; return; }}
@@ -565,7 +589,17 @@ async def video_page():
                 resp = await fetch('/video/use-source', {{ method: 'POST', body: form }});
             }}
 
-            const data = await resp.json();
+            let data;
+            try {{
+                data = await resp.json();
+            }} catch(_) {{
+                const hint = isUpload && resp.status === 413
+                    ? ' — file too large for server (nginx limit)'
+                    : '';
+                status.innerHTML = '<div style="color:#ff4400">Failed (HTTP ' + resp.status + ')' + hint + '.</div>';
+                btn.disabled = false;
+                return;
+            }}
             if (data.job_id) {{
                 startTime = Date.now();
                 renderProgress(data.job_id, selectedPreset, 'starting');
@@ -619,6 +653,17 @@ async def video_page():
     function renderSingle(r) {{
         const e = r.energy;
         const t = r.thermals;
+        const pptNote = t.gpu_ppt_mean_w
+            ? metricRow('GPU PPT mean / peak', t.gpu_ppt_mean_w + ' / ' + t.gpu_ppt_peak_w, 'W')
+              + '<div style="color:#444;font-size:0.72rem;padding:0.1rem 0 0.6rem 1rem">'
+              + 'GPU self-reported power (PPT). P110 ΔW above is the full system delta — includes CPU, RAM, drives.'
+              + '</div>'
+            : '';
+        const cmdNote = r.transcode && r.transcode.ffmpeg_cmd
+            ? '<details style="margin-top:0.75rem"><summary style="color:#333;font-size:0.72rem;cursor:pointer">ffmpeg command</summary>'
+              + '<div style="color:#555;font-size:0.7rem;font-family:monospace;word-break:break-all;margin-top:0.4rem;padding:0.5rem;background:#0d0d0d;border:1px solid #1a1a1a">'
+              + r.transcode.ffmpeg_cmd + '</div></details>'
+            : '';
         return `
         <div class="single-report">
             <h2>Energy Report — ${{r.preset_label}}</h2>
@@ -626,6 +671,7 @@ async def video_page():
             ${{metricRow('Preset', r.preset_detail)}}
             ${{metricRow('Duration', e.delta_t_s, 's')}}
             ${{metricRow('Output size', r.output_size_mb, 'MB')}}
+            ${{cmdNote}}
             <div class="section-title">Power (P110)</div>
             ${{metricRow('Baseline', e.w_base, 'W')}}
             ${{metricRow('Task mean', e.w_task, 'W')}}
@@ -635,7 +681,7 @@ async def video_page():
             <div class="section-title">Thermals</div>
             ${{metricRow('CPU base → peak', t.cpu_base + ' → ' + t.cpu_peak, '°C')}}
             ${{metricRow('GPU base → peak', t.gpu_base + ' → ' + t.gpu_peak, '°C')}}
-            ${{t.gpu_ppt_mean_w ? metricRow('GPU PPT mean / peak', t.gpu_ppt_mean_w + ' / ' + t.gpu_ppt_peak_w, 'W') : ''}}
+            ${{pptNote}}
             <div style="margin-top:0.75rem">${{e.confidence.flag}} ${{e.confidence.label}}</div>
         </div>`;
     }}
@@ -650,12 +696,24 @@ async def video_page():
             const t = res.thermals;
             const isEnergyWinner = a.energy_winner === (res.preset_key === 'cpu' ? 'CPU' : 'GPU');
             const isSpeedWinner  = a.speed_winner  === (res.preset_key === 'cpu' ? 'CPU' : 'GPU');
+            const pptNote = t.gpu_ppt_mean_w
+                ? metricRow('GPU PPT mean', t.gpu_ppt_mean_w, 'W')
+                  + '<div style="color:#444;font-size:0.72rem;padding:0.1rem 0 0.6rem 1rem">'
+                  + 'GPU self-reported · P110 ΔW is full system delta.'
+                  + '</div>'
+                : '';
+            const cmdNote = res.transcode && res.transcode.ffmpeg_cmd
+                ? '<details style="margin-top:0.5rem"><summary style="color:#333;font-size:0.7rem;cursor:pointer">ffmpeg command</summary>'
+                  + '<div style="color:#555;font-size:0.68rem;font-family:monospace;word-break:break-all;margin-top:0.3rem;padding:0.4rem;background:#0d0d0d;border:1px solid #1a1a1a">'
+                  + res.transcode.ffmpeg_cmd + '</div></details>'
+                : '';
             return `<div class="col">
                 <h3>${{res.preset_label}}</h3>
                 <div class="sub">${{res.preset_detail}}</div>
                 <div class="section-title">Encode</div>
                 ${{metricRow('Duration', e.delta_t_s + (isSpeedWinner ? ' 🏁' : ''), 's')}}
                 ${{metricRow('Output size', res.output_size_mb, 'MB')}}
+                ${{cmdNote}}
                 <div class="section-title">Power (P110)</div>
                 ${{metricRow('Baseline', e.w_base, 'W')}}
                 ${{metricRow('Task mean', e.w_task, 'W')}}
@@ -665,7 +723,7 @@ async def video_page():
                 <div class="section-title">Thermals</div>
                 ${{metricRow('CPU base → peak', t.cpu_base + ' → ' + t.cpu_peak, '°C')}}
                 ${{metricRow('GPU base → peak', t.gpu_base + ' → ' + t.gpu_peak, '°C')}}
-                ${{t.gpu_ppt_mean_w ? metricRow('GPU PPT mean', t.gpu_ppt_mean_w, 'W') : ''}}
+                ${{pptNote}}
                 <div style="margin-top:0.75rem;font-size:0.8rem">
                     ${{e.confidence.flag}} ${{e.confidence.label}}
                 </div>

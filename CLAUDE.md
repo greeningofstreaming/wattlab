@@ -165,7 +165,7 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] nginx running on GoS1
 - [x] BouyguesBox: TCP 80+443 → 192.168.1.62
 - [x] Password gate: cookie-based, `WATTLAB_GATE_PASSWORD` in `.env`
-- [ ] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` (after Easter, Wix admin needed)
+- [ ] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` — DNS table lost during Wix ownership transfer (Dom → Ben). Needs rebuild.
 - [ ] Let's Encrypt SSL: `sudo certbot --nginx -d wattlab.greeningofstreaming.org`
 - [ ] Enable HTTP→HTTPS redirect in nginx config, reload nginx
 
@@ -186,11 +186,25 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] Shared `_PROGRESS_JS`: `wlRenderProgress`, `wlStageList`, `wlRenderQueued`, `wlFormatElapsed` — injected into all 4 test pages
 - [x] Home nav restructured: Guided Tour prominent, primary (Video/Image/LLM), secondary (RAG/Queue/Settings)
 
+### Session 10 — Infrastructure & Measurement Quality (2026-04-07) ✅
+- [x] nginx `client_max_body_size 2g` — fixes video upload 413 for files >1MB
+  - Note: `systemctl reload` insufficient (old workers keep old config); requires `systemctl restart nginx`
+- [x] Centralized power cache: `_power_cache` + `power_poller()` background task (5s cadence)
+  - `/power` endpoint and home page read from cache; no direct P110 call on request path
+  - Fixes multi-user power display sync issue
+- [x] FFmpeg command logged in result JSON (`transcode.ffmpeg_cmd`) and shown in result card as collapsible
+- [x] GPU PPT explanatory note in result cards (PPT vs P110 system delta)
+- [x] Home nav: Video gets own row; Image/LLM/RAG under "AI WORKLOADS" label; Queue/Settings as utility row
+
 ### Deferred
-- [ ] DNS A record + SSL cert (after Easter, pending Wix admin access)
+- [ ] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` — DNS table wiped during Wix ownership transfer (Dom → Ben). Rebuild needed.
+- [ ] SSL: `sudo certbot --nginx -d wattlab.greeningofstreaming.org` — after DNS restored. Note: use `systemctl restart nginx` (not reload) after certbot edits config.
 - [ ] Image page progress bar: add elapsed time (video + LLM already have it)
 - [ ] GPU image generation: code complete, needs first clean measurement run
 - [ ] phi4 pull: `ollama pull phi4` (9.1GB) — enables 14B model in RAG compare
+- [ ] Confidence threshold refinement: working session with Tanya (current thresholds are heuristic, need statistical grounding)
+- [ ] Transcoding profile documentation: confirm H.264/H.265/AV1 presets are apples-to-apples (same bitrate target, GOP, profile level) — work with Simon/Tanya
+- [ ] CPU temp under GPU load: investigate why CPU heats more during GPU encode than CPU encode
 
 ## Key Findings to Date
 

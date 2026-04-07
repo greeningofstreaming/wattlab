@@ -188,6 +188,7 @@ def transcode(cmd: list) -> dict:
     return {
         "success": result.returncode == 0,
         "duration_s": round(t_end - t_start, 1),
+        "ffmpeg_cmd": " ".join(cmd),
         "stderr": result.stderr[-500:] if result.returncode != 0 else ""
     }
 
