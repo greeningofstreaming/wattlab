@@ -61,12 +61,13 @@ PRESETS = {
     },
     "gpu": {
         "label": "H.264 GPU",
-        "detail": "h264_vaapi · QP 23 · 1080p · AMD RX 7800 XT",
+        "detail": "h264_vaapi · QP 23 · 1080p · AMD RX 7800 XT · full pipeline",
         "cmd": lambda i, o: [
             "ffmpeg", "-y",
+            "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi",
             "-vaapi_device", "/dev/dri/renderD128",
             "-i", str(i),
-            "-vf", "scale=-2:1080,format=nv12,hwupload",
+            "-vf", "scale_vaapi=-2:1080",
             "-c:v", "h264_vaapi", "-qp", "23",
             "-c:a", "aac", "-b:a", "128k",
             str(o)
@@ -85,12 +86,13 @@ PRESETS = {
     },
     "h265_gpu": {
         "label": "H.265 GPU",
-        "detail": "hevc_vaapi · QP 28 · 1080p · AMD RX 7800 XT",
+        "detail": "hevc_vaapi · QP 28 · 1080p · AMD RX 7800 XT · full pipeline",
         "cmd": lambda i, o: [
             "ffmpeg", "-y",
+            "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi",
             "-vaapi_device", "/dev/dri/renderD128",
             "-i", str(i),
-            "-vf", "scale=-2:1080,format=nv12,hwupload",
+            "-vf", "scale_vaapi=-2:1080",
             "-c:v", "hevc_vaapi", "-qp", "28",
             "-c:a", "aac", "-b:a", "128k",
             str(o)

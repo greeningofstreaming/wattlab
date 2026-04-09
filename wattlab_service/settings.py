@@ -27,8 +27,9 @@ DEFAULTS = {
         " -vf scale=-2:1080 -c:a aac -b:a 128k {output}"
     ),
     "variance_gpu_cmd": (
-        "ffmpeg -y -vaapi_device /dev/dri/renderD128 -i {input}"
-        " -vf scale=-2:1080,format=nv12,hwupload"
+        "ffmpeg -y -hwaccel vaapi -hwaccel_output_format vaapi"
+        " -vaapi_device /dev/dri/renderD128 -i {input}"
+        " -vf scale_vaapi=-2:1080"
         " -c:v hevc_vaapi -qp 28 -c:a aac -b:a 128k {output}"
     ),
     "rag_corpus_path": "/home/gos/wattlab/corpus/papers",

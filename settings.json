@@ -1,0 +1,20 @@
+{
+  "baseline_polls": 10,
+  "video_cooldown_s": 60,
+  "llm_rest_s": 10,
+  "llm_unload_settle_s": 3,
+  "conf_green_polls": 10,
+  "conf_yellow_polls": 5,
+  "variance_pct": 2.53,
+  "variance_green_x": 5,
+  "variance_yellow_x": 2,
+  "variance_idle_pct": 4.21,
+  "variance_cpu_pct": 3.21,
+  "variance_gpu_pct": 0.17,
+  "variance_runs": 2,
+  "variance_cooldown_s": 10,
+  "variance_cpu_cmd": "ffmpeg -y -i {input} -c:v libx264 -crf 23 -vf scale=-2:1080 -c:a aac -b:a 128k {output}",
+  "variance_gpu_cmd": "ffmpeg -y -hwaccel vaapi -hwaccel_output_format vaapi -vaapi_device /dev/dri/renderD128 -i {input} -vf scale_vaapi=-2:1080 -c:v hevc_vaapi -qp 28 -c:a aac -b:a 128k {output}",
+  "rag_corpus_path": "/home/gos/wattlab/corpus/papers",
+  "rag_chroma_path": "/home/gos/wattlab/.chroma"
+}

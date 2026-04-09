@@ -449,8 +449,8 @@ async def video_page(request: Request):
         </div>
         <div class="preset" id="preset-gpu" onclick="selectPreset('gpu')">
             <h3>H.264 GPU</h3>
-            <p style="color:#555;font-size:0.75rem;margin-bottom:0.4rem">h264_vaapi · QP 23 · 1080p</p>
-            <p>AMD RX 7800 XT hardware acceleration.</p>
+            <p style="color:#555;font-size:0.75rem;margin-bottom:0.4rem">h264_vaapi · QP 23 · 1080p · full pipeline</p>
+            <p>Hardware decode + encode. Full GPU pipeline — representative of live encoding.</p>
         </div>
         <div class="preset selected" id="preset-both" onclick="selectPreset('both')">
             <div class="badge">DEFAULT</div>
@@ -469,8 +469,8 @@ async def video_page(request: Request):
         </div>
         <div class="preset" id="preset-h265_gpu" onclick="selectPreset('h265_gpu')">
             <h3>H.265 GPU</h3>
-            <p style="color:#555;font-size:0.75rem;margin-bottom:0.4rem">hevc_vaapi · QP 28 · 1080p</p>
-            <p>AMD hardware HEVC.</p>
+            <p style="color:#555;font-size:0.75rem;margin-bottom:0.4rem">hevc_vaapi · QP 28 · 1080p · full pipeline</p>
+            <p>Hardware decode + encode. Full GPU pipeline — representative of live encoding.</p>
         </div>
         <div class="preset" id="preset-av1_cpu" onclick="selectPreset('av1_cpu')">
             <h3>AV1 CPU</h3>
@@ -2910,15 +2910,17 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     <div class="band-label">What we're doing</div>
     <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
       Encoding a 4K clip (Meridian, Netflix Open Content, CC BY 4.0) to 1080p H.264 —
-      once in software (libx264) and once with hardware acceleration (h264_vaapi).
-      Same source. Same quality target. P110 sampled every second throughout.
+      once in software (libx264, CPU only) and once as a full GPU pipeline
+      (hardware decode + encode via h264_vaapi). Same source. Same quality target.
+      P110 sampled every second throughout.
     </p>
     <details>
       <summary>How this is measured</summary>
       <p>10s idle baseline before each run. 60s thermal cooldown between CPU and GPU.
       Energy = ΔW × duration / 3600. Confidence 🟢 = ΔW &gt; 5W and ≥ 10 polls.</p>
-      <p>Source: 812 MB, 4K. Encode time ~2–3 min CPU, ~90s GPU.
-      Previous runs: CPU 174s / 4.06 Wh mean · GPU 114s / 4.42 Wh mean (4 runs).</p>
+      <p>Source: 812 MB, 4K. Encode time ~2–3 min CPU, ~90s GPU (full pipeline).
+      Previous runs (partial pipeline): CPU 174s / 4.06 Wh · GPU 114s / 4.42 Wh.
+      Full pipeline results pending first run.</p>
     </details>
   </div>
 
