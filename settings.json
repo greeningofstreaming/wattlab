@@ -14,7 +14,7 @@
   "variance_runs": 2,
   "variance_cooldown_s": 10,
   "variance_cpu_cmd": "ffmpeg -y -i {input} -c:v libx264 -crf 23 -vf scale=-2:1080 -c:a aac -b:a 128k {output}",
-  "variance_gpu_cmd": "ffmpeg -y -hwaccel vaapi -hwaccel_output_format vaapi -vaapi_device /dev/dri/renderD128 -i {input} -vf scale_vaapi=-2:1080 -c:v hevc_vaapi -qp 28 -c:a aac -b:a 128k {output}",
+  "variance_gpu_cmd": "ffmpeg -y -hwaccel vaapi -hwaccel_output_format vaapi -extra_hw_frames 32 -vaapi_device /dev/dri/renderD128 -i {input} -vf scale_vaapi=-2:1080 -c:v hevc_vaapi -qp 28 -c:a aac -b:a 128k {output}",
   "rag_corpus_path": "/home/gos/wattlab/corpus/papers",
   "rag_chroma_path": "/home/gos/wattlab/.chroma"
 }

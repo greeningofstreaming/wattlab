@@ -65,6 +65,7 @@ PRESETS = {
         "cmd": lambda i, o: [
             "ffmpeg", "-y",
             "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi",
+            "-extra_hw_frames", "32",
             "-vaapi_device", "/dev/dri/renderD128",
             "-i", str(i),
             "-vf", "scale_vaapi=-2:1080",
@@ -90,6 +91,7 @@ PRESETS = {
         "cmd": lambda i, o: [
             "ffmpeg", "-y",
             "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi",
+            "-extra_hw_frames", "32",
             "-vaapi_device", "/dev/dri/renderD128",
             "-i", str(i),
             "-vf", "scale_vaapi=-2:1080",
@@ -115,6 +117,7 @@ PRESETS = {
         "cmd": lambda i, o: [
             "ffmpeg", "-y",
             "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi",
+            "-extra_hw_frames", "32",
             "-vaapi_device", "/dev/dri/renderD128",
             "-i", str(i),
             "-vf", "scale_vaapi=-2:1080",
