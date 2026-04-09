@@ -15,6 +15,10 @@ DEFAULTS = {
     "variance_pct": 2.0,        # measured system variance as % of baseline power
     "variance_green_x": 5.0,    # 🟢  ΔW must exceed this × noise_w
     "variance_yellow_x": 2.0,   # 🟡  ΔW must exceed this × noise_w
+    # Variance calibration outputs (written by calibration run, not user-edited)
+    "variance_idle_pct": None,   # CV of raw idle P110 readings across all baseline periods
+    "variance_cpu_pct": None,    # CV of ΔW across H264-CPU runs
+    "variance_gpu_pct": None,    # CV of ΔW across H265-GPU runs
     # Variance calibration run parameters
     "variance_runs": 10,         # how many H264-CPU + H265-GPU pairs to run
     "variance_cooldown_s": 60,   # seconds between each run pair

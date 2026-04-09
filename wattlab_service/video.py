@@ -412,33 +412,59 @@ async def run_both_measurement_path(path: str, job_id: str,
 
 # --- Variance calibration ---
 
+def _cv(values: list) -> float | None:
+    """Coefficient of variation as %, sample std dev / mean × 100."""
+    n = len(values)
+    if n < 2:
+        return None
+    m = sum(values) / n
+    if abs(m) < 0.001:
+        return None
+    std = (sum((v - m) ** 2 for v in values) / (n - 1)) ** 0.5
+    return round(std / abs(m) * 100, 2)
+
+
 async def run_variance_calibration(job_id: str, jobs: dict) -> dict:
-    """Run H264-CPU then H265-GPU on Meridian N times, compute coefficient of
-    variation across all ΔW readings, and update variance_pct in settings."""
+    """Run H264-CPU then H265-GPU on Meridian N times.
+    Computes three separate CVs:
+      idle  — raw P110 readings during all baseline periods (instrument + background noise)
+      cpu   — ΔW per H264-CPU run (run-to-run reproducibility)
+      gpu   — ΔW per H265-GPU run
+    Updates variance_idle_pct, variance_cpu_pct, variance_gpu_pct, and
+    sets variance_pct = mean of the three in settings.json.
+    """
     s = cfg.load()
     meridian = Path("/home/gos/wattlab/test_content/meridian_4k.mp4")
     n_runs = int(s["variance_runs"])
     cooldown = float(s["variance_cooldown_s"])
+    n_base = int(s["baseline_polls"])
     cpu_tpl = s["variance_cpu_cmd"]
     gpu_tpl = s["variance_gpu_cmd"]
 
     stopped = focus_mode_enter()
-    delta_w_values: list[float] = []
+    idle_readings: list[float] = []   # raw P110 watts during all baselines
+    cpu_delta_w: list[float] = []     # ΔW per CPU run
+    gpu_delta_w: list[float] = []     # ΔW per GPU run
 
     LOCK_FILE.write_text(job_id)
     try:
         for i in range(n_runs):
             run_label = f"{i + 1}/{n_runs}"
 
-            # --- CPU pass ---
+            # --- CPU baseline (collect raw readings for idle CV) ---
             if jobs:
                 jobs[job_id]["stage"] = f"run_{run_label}_cpu_baseline"
-            base_cpu = await measure_baseline(polls=s["baseline_polls"])
-            w_base_cpu = base_cpu["w_base"]
+            raw_cpu_base = []
+            for _ in range(n_base):
+                w = await get_power_watts()
+                raw_cpu_base.append(w)
+                idle_readings.append(w)
+                await asyncio.sleep(POLL_INTERVAL)
+            w_base_cpu = sum(raw_cpu_base) / len(raw_cpu_base)
 
+            # --- CPU encode ---
             out_cpu = UPLOAD_DIR / f"{job_id}_var_cpu_{i}.mp4"
             cmd_cpu = apply_custom_cmd(cpu_tpl, meridian, out_cpu)
-
             if jobs:
                 jobs[job_id]["stage"] = f"run_{run_label}_cpu_encode"
             stop_cpu = asyncio.Event()
@@ -447,25 +473,29 @@ async def run_variance_calibration(job_id: str, jobs: dict) -> dict:
             stop_cpu.set()
             readings_cpu = await poll_cpu
             out_cpu.unlink(missing_ok=True)
-
             if readings_cpu:
                 w_task = sum(r["watts"] for r in readings_cpu) / len(readings_cpu)
-                delta_w_values.append(round(w_task - w_base_cpu, 3))
+                cpu_delta_w.append(round(w_task - w_base_cpu, 3))
 
             # --- Cooldown between CPU and GPU ---
             if jobs:
                 jobs[job_id]["stage"] = f"run_{run_label}_cooldown"
             await asyncio.sleep(cooldown)
 
-            # --- GPU pass ---
+            # --- GPU baseline (collect raw readings for idle CV) ---
             if jobs:
                 jobs[job_id]["stage"] = f"run_{run_label}_gpu_baseline"
-            base_gpu = await measure_baseline(polls=s["baseline_polls"])
-            w_base_gpu = base_gpu["w_base"]
+            raw_gpu_base = []
+            for _ in range(n_base):
+                w = await get_power_watts()
+                raw_gpu_base.append(w)
+                idle_readings.append(w)
+                await asyncio.sleep(POLL_INTERVAL)
+            w_base_gpu = sum(raw_gpu_base) / len(raw_gpu_base)
 
+            # --- GPU encode ---
             out_gpu = UPLOAD_DIR / f"{job_id}_var_gpu_{i}.mp4"
             cmd_gpu = apply_custom_cmd(gpu_tpl, meridian, out_gpu)
-
             if jobs:
                 jobs[job_id]["stage"] = f"run_{run_label}_gpu_encode"
             stop_gpu = asyncio.Event()
@@ -474,10 +504,9 @@ async def run_variance_calibration(job_id: str, jobs: dict) -> dict:
             stop_gpu.set()
             readings_gpu = await poll_gpu
             out_gpu.unlink(missing_ok=True)
-
             if readings_gpu:
                 w_task2 = sum(r["watts"] for r in readings_gpu) / len(readings_gpu)
-                delta_w_values.append(round(w_task2 - w_base_gpu, 3))
+                gpu_delta_w.append(round(w_task2 - w_base_gpu, 3))
 
             # --- Inter-run cooldown (skip after last run) ---
             if i < n_runs - 1:
@@ -493,29 +522,30 @@ async def run_variance_calibration(job_id: str, jobs: dict) -> dict:
     if jobs:
         jobs[job_id]["stage"] = "computing"
 
-    # Compute coefficient of variation across all ΔW readings
-    n = len(delta_w_values)
-    cv_pct = None
-    std_dw = None
-    mean_dw = None
-    if n >= 2:
-        mean_dw = sum(delta_w_values) / n
-        variance = sum((v - mean_dw) ** 2 for v in delta_w_values) / (n - 1)
-        std_dw = variance ** 0.5
-        cv_pct = round(std_dw / max(abs(mean_dw), 0.001) * 100, 2) if mean_dw else None
+    idle_cv = _cv(idle_readings)
+    cpu_cv  = _cv(cpu_delta_w)
+    gpu_cv  = _cv(gpu_delta_w)
+    available = [v for v in [idle_cv, cpu_cv, gpu_cv] if v is not None]
+    mean_cv = round(sum(available) / len(available), 2) if available else None
 
     result = {
-        "runs_completed": n,
-        "delta_w_values": delta_w_values,
-        "mean_delta_w": round(mean_dw, 3) if mean_dw is not None else None,
-        "std_delta_w": round(std_dw, 3) if std_dw is not None else None,
-        "cv_pct": cv_pct,
+        "runs_completed": len(cpu_delta_w),
+        "idle_readings_n": len(idle_readings),
+        "cpu_delta_w_values": cpu_delta_w,
+        "gpu_delta_w_values": gpu_delta_w,
+        "variance_idle_pct": idle_cv,
+        "variance_cpu_pct":  cpu_cv,
+        "variance_gpu_pct":  gpu_cv,
+        "variance_mean_pct": mean_cv,
         "variance_updated": False,
     }
 
-    if cv_pct is not None:
+    if mean_cv is not None:
         current = cfg.load()
-        current["variance_pct"] = cv_pct
+        current["variance_idle_pct"] = idle_cv
+        current["variance_cpu_pct"]  = cpu_cv
+        current["variance_gpu_pct"]  = gpu_cv
+        current["variance_pct"]      = mean_cv
         cfg.save(current)
         result["variance_updated"] = True
 

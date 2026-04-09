@@ -39,6 +39,11 @@ Added to `DEFAULTS` and Settings page Confidence section:
 - `variance_pct` — measured system variance as % of baseline; auto-updated by calibration
 - `variance_green_x`, `variance_yellow_x` — multiplier thresholds (default 5×, 2×)
 
+Three read-only calibration output fields shown in the Confidence thresholds section (above the editable `variance_pct`):
+- `variance_idle_pct`, `variance_cpu_pct`, `variance_gpu_pct` — display "—" until first calibration run
+- Visually distinct (dimmer label, no input control); `calib_field()` helper in settings_page()
+- These are always read-only (even on LAN) — only updated by a calibration run
+
 New Settings page section **Variance calibration** with:
 - `variance_runs` slider (5–100, step 5) — number of H264-CPU + H265-GPU run pairs
 - `variance_cooldown_s` slider (10–300, step 10) — cooldown between each pair
@@ -51,10 +56,13 @@ New Settings page section **Variance calibration** with:
 - POST endpoint, LAN-only (403 on public)
 - Queues a job labelled "Variance calibration — system offline"
 - `run_variance_calibration()` in `video.py`: runs N × (H264-CPU baseline→encode + cooldown + H265-GPU baseline→encode) on Meridian
-- Computes coefficient of variation: CV = σ/μ × 100 across all ΔW readings
-- Writes result back to `settings.json` as `variance_pct`
+- **Three separate CVs** (revised after first run showed 24.62% — root cause: original code pooled H264 ΔW ~30W and H265 ΔW ~70W together, so CV was measuring workload difference not instrument noise):
+  - `variance_idle_pct` — CV of raw P110 readings across all inline baseline polls
+  - `variance_cpu_pct` — CV of ΔW across all H264-CPU encode runs
+  - `variance_gpu_pct` — CV of ΔW across all H265-GPU encode runs
+  - `variance_pct` — mean of the three (the operative noise estimate used for confidence thresholds)
+- All four values written to `settings.json`; three read-only calibration fields shown in Settings page above the editable `variance_pct` field
 - Stage labels visible in queue status: `run_1/N_cpu_encode`, `run_1/N_cooldown`, `run_1/N_gpu_encode`, etc.
-- Calibration running as of session end (expected ~1 hour for 10 runs × 2 encodes)
 
 #### ffmpeg command preview + edit on video page
 - Before clicking Run, the ffmpeg command that would be executed is shown below the preset selector

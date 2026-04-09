@@ -2569,6 +2569,18 @@ async def settings_page(request: Request):
                 f'<label style="color:#aaa;font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
                 f'{hint_html}{ctrl}</div>')
 
+    def calib_field(fid, val, hint=""):
+        disp = f"{val:.2f} %" if val is not None else "—"
+        color = "#00ff99" if val is not None else "#333"
+        hint_html = f'<div style="color:#333;font-size:0.72rem;margin-top:0.1rem">{hint}</div>' if hint else ""
+        return (f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+                f'padding:0.5rem 0;border-bottom:1px solid #0d0d0d;gap:1rem">'
+                f'<div><label style="color:#666;font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
+                f'{hint_html}</div>'
+                f'<div style="display:flex;align-items:baseline;gap:0.5rem">'
+                f'<span style="font-family:monospace;color:{color};font-size:0.95rem">{disp}</span>'
+                f'</div></div>')
+
     notice = ('' if local else
               '<div style="background:#111;border-left:3px solid #555;padding:0.75rem 1rem;'
               'margin-bottom:1.5rem;font-size:0.82rem;color:#555">'
@@ -2609,7 +2621,10 @@ async def settings_page(request: Request):
     {field("llm_unload_settle_s", s['llm_unload_settle_s'], 1, 30, "s",   "wait after model unload before baseline")}
 
     <div class="section">Confidence thresholds</div>
-    {field("variance_pct",     s['variance_pct'],     0, 50,  "%",     "measured system variance — auto-updated by calibration", step=0.1)}
+    {calib_field("variance_idle_pct", s['variance_idle_pct'], "CV of raw idle P110 readings — set by calibration")}
+    {calib_field("variance_cpu_pct",  s['variance_cpu_pct'],  "CV of ΔW across H264-CPU runs — set by calibration")}
+    {calib_field("variance_gpu_pct",  s['variance_gpu_pct'],  "CV of ΔW across H265-GPU runs — set by calibration")}
+    {field("variance_pct",     s['variance_pct'],     0, 50,  "%",     "composite variance (mean of above) — editable override", step=0.1)}
     {field("variance_green_x", s['variance_green_x'], 1, 20,  "× noise", "🟢 ΔW must exceed this multiple of noise floor", step=0.5)}
     {field("variance_yellow_x",s['variance_yellow_x'],1, 10,  "× noise", "🟡 ΔW must exceed this multiple of noise floor", step=0.5)}
     {field("conf_green_polls", s['conf_green_polls'],  1, 100, "polls", "🟢 minimum poll count")}
@@ -2617,9 +2632,9 @@ async def settings_page(request: Request):
 
     <div class="section">Variance calibration</div>
     <div style="color:#444;font-size:0.75rem;line-height:1.6;margin-bottom:0.75rem">
-      Runs H.264 CPU then H.265 GPU on Meridian N times. Computes coefficient of
-      variation (σ/μ) across all ΔW readings and writes it to Variance % above.
-      Queue is blocked for the duration — label shows "Variance calibration — system offline".
+      Runs H.264 CPU then H.265 GPU on Meridian N times. Computes three coefficients of
+      variation: idle (raw P110 baseline readings), CPU (ΔW per H264 run), GPU (ΔW per H265 run).
+      Their mean is written to Variance % above. Queue is blocked for the duration.
     </div>
     {slider_field("variance_runs",      s['variance_runs'],      5,  100, 5,  "runs",    "number of H264-CPU + H265-GPU run pairs")}
     {slider_field("variance_cooldown_s",s['variance_cooldown_s'],10, 300, 10, "s",       "cooldown between each run pair")}

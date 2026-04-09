@@ -205,7 +205,8 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] Variance-based confidence framework — replaces fixed ΔW thresholds (5W/2W) with `noise_w = variance_pct/100 × w_base`; `confidence()` updated in all 4 modules with new `w_base` param
 - [x] New settings params: `variance_pct` (2.0%), `variance_green_x` (5×), `variance_yellow_x` (2×), `variance_runs`, `variance_cooldown_s`, `variance_cpu_cmd`, `variance_gpu_cmd`
 - [x] Settings page: Confidence section updated; new Variance calibration section with sliders + editable cmd textareas + Run button
-- [x] `/variance/run` endpoint — queues calibration job; runs N × (H264-CPU + H265-GPU) on Meridian, computes CV, writes `variance_pct` to settings.json
+- [x] `/variance/run` endpoint — queues calibration job; runs N × (H264-CPU + H265-GPU) on Meridian, computes **three separate CVs**: `variance_idle_pct` (raw P110 baselines), `variance_cpu_pct` (H264 ΔW), `variance_gpu_pct` (H265 ΔW); mean → `variance_pct`
+- [x] Settings page: three read-only calibration output fields shown above editable `variance_pct`; show "—" until first calibration run
 - [x] `/video/preview-cmd` endpoint — returns ffmpeg command template(s) for selected preset
 - [x] Video page: ffmpeg command shown before run; editable textarea on LAN, read-only on public; custom cmd passed through to run endpoints
 - [x] `persist.py` CSV: `ffmpeg_cmd` added to video export
