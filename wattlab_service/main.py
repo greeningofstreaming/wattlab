@@ -2698,7 +2698,9 @@ async def settings_page(request: Request):
         const msg = document.getElementById('var-cal-msg');
         if (!btn) return;
         btn.disabled = true;
-        msg.innerHTML = '<span style="color:#ffaa00">Queuing calibration job...</span>';
+        msg.innerHTML = '<span style="color:#ffaa00">Saving settings…</span>';
+        await saveSettings();
+        msg.innerHTML = '<span style="color:#ffaa00">Queuing calibration job…</span>';
         try {{
             const resp = await fetch('/variance/run', {{method: 'POST'}});
             const data = await resp.json();
