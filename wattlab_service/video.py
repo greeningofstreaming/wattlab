@@ -1,4 +1,5 @@
 import asyncio
+import shlex
 import subprocess
 import time
 import json
@@ -168,16 +169,35 @@ async def poll_during_task(stop_event: asyncio.Event) -> list:
 
 # --- Confidence ---
 
-def confidence(delta_w: float, poll_count: int) -> dict:
+def confidence(delta_w: float, poll_count: int, w_base: float) -> dict:
+    """Variance-based confidence: noise_w = variance_pct/100 * w_base.
+    Green if ΔW > green_x × noise_w AND polls ≥ green_polls.
+    Yellow if ΔW ≥ yellow_x × noise_w OR polls ≥ yellow_polls.
+    Red otherwise.
+    """
     s = cfg.load()
-    if delta_w > s["conf_green_delta_w"] and poll_count >= s["conf_green_polls"]:
+    noise_w = s["variance_pct"] / 100.0 * max(w_base, 1.0)
+    green_thresh = s["variance_green_x"] * noise_w
+    yellow_thresh = s["variance_yellow_x"] * noise_w
+    if delta_w > green_thresh and poll_count >= s["conf_green_polls"]:
         return {"flag": "🟢", "label": "Repeatable"}
-    elif delta_w >= s["conf_yellow_delta_w"] or poll_count >= s["conf_yellow_polls"]:
+    elif delta_w >= yellow_thresh or poll_count >= s["conf_yellow_polls"]:
         return {"flag": "🟡", "label": "Early insight"}
     else:
-        return {"flag": "🔴", "label": "Need more data — delta near P110 noise floor"}
+        return {"flag": "🔴", "label": "Need more data"}
 
 # --- ffmpeg ---
+
+def build_preset_cmd(preset_key: str, input_path, output_path) -> list:
+    """Return the ffmpeg command list for a preset (no nice prefix)."""
+    return PRESETS[preset_key]["cmd"](Path(input_path), Path(output_path))
+
+
+def apply_custom_cmd(custom_cmd: str, input_path, output_path) -> list:
+    """Substitute {input}/{output} placeholders and shlex-split a custom command string."""
+    cmd_str = custom_cmd.replace("{input}", str(input_path)).replace("{output}", str(output_path))
+    return shlex.split(cmd_str)
+
 
 def transcode(cmd: list) -> dict:
     # nice -n -5 gives ffmpeg elevated CPU scheduling priority
@@ -195,14 +215,17 @@ def transcode(cmd: list) -> dict:
 # --- Single run ---
 
 async def run_single(input_path: Path, job_id: str, preset_key: str,
-                     baseline: dict) -> dict:
+                     baseline: dict, custom_cmd: str = None) -> dict:
     preset = PRESETS[preset_key]
     output_path = UPLOAD_DIR / f"{job_id}_{preset_key}_out.mp4"
 
     stop_event = asyncio.Event()
     t_start = time.time()
 
-    cmd = preset["cmd"](input_path, output_path)
+    if custom_cmd and custom_cmd.strip():
+        cmd = apply_custom_cmd(custom_cmd, input_path, output_path)
+    else:
+        cmd = preset["cmd"](input_path, output_path)
     poll_task = asyncio.create_task(poll_during_task(stop_event))
     transcode_result = await asyncio.get_event_loop().run_in_executor(
         None, transcode, cmd
@@ -217,7 +240,7 @@ async def run_single(input_path: Path, job_id: str, preset_key: str,
     w_task = sum(r["watts"] for r in readings) / len(readings) if readings else w_base
     delta_w = round(w_task - w_base, 2)
     delta_e_wh = round(delta_w * (delta_t / 3600), 4)
-    conf = confidence(delta_w, len(readings))
+    conf = confidence(delta_w, len(readings), w_base)
 
     cpu_temps = [r["cpu_tctl"] for r in readings if r.get("cpu_tctl")]
     gpu_temps = [r["gpu_junction"] for r in readings if r.get("gpu_junction")]
@@ -316,7 +339,8 @@ def analyse(cpu: dict, gpu: dict) -> dict:
 # --- Main entry points ---
 
 async def run_video_measurement(input_path: Path, job_id: str,
-                                preset_key: str, jobs: dict = None) -> dict:
+                                preset_key: str, jobs: dict = None,
+                                custom_cmd: str = None) -> dict:
     s = cfg.load()
     if jobs is not None: jobs[job_id]["stage"] = "baseline"
     stopped = focus_mode_enter()
@@ -324,11 +348,10 @@ async def run_video_measurement(input_path: Path, job_id: str,
     LOCK_FILE.write_text(job_id)
     try:
         if jobs is not None: jobs[job_id]["stage"] = f"{preset_key}_encode"
-        result = await run_single(input_path, job_id, preset_key, baseline)
+        result = await run_single(input_path, job_id, preset_key, baseline, custom_cmd)
         if jobs is not None: jobs[job_id]["stage"] = "done"
     finally:
         LOCK_FILE.unlink(missing_ok=True)
-        # Run focus_mode_exit in executor so it doesn't block event loop
         loop = asyncio.get_event_loop()
         loop.run_in_executor(None, focus_mode_exit, stopped)
     return {
@@ -339,7 +362,9 @@ async def run_video_measurement(input_path: Path, job_id: str,
         "scope": "Device layer only (GoS1 server). Network, CDN, CPE excluded.",
     }
 
-async def run_both_measurement(input_path: Path, job_id: str, jobs: dict = None) -> dict:
+async def run_both_measurement(input_path: Path, job_id: str, jobs: dict = None,
+                               custom_cmd_cpu: str = None,
+                               custom_cmd_gpu: str = None) -> dict:
     s = cfg.load()
     if jobs is not None: jobs[job_id]["stage"] = "baseline"
     stopped = focus_mode_enter()
@@ -347,13 +372,13 @@ async def run_both_measurement(input_path: Path, job_id: str, jobs: dict = None)
     LOCK_FILE.write_text(job_id)
     try:
         if jobs is not None: jobs[job_id]["stage"] = "cpu_encode"
-        cpu_result = await run_single(input_path, job_id, "cpu", baseline)
+        cpu_result = await run_single(input_path, job_id, "cpu", baseline, custom_cmd_cpu)
         if jobs is not None: jobs[job_id]["stage"] = "rest"
         await asyncio.sleep(s["video_cooldown_s"])
         if jobs is not None: jobs[job_id]["stage"] = "baseline_2"
         gpu_baseline = await measure_baseline(polls=s["baseline_polls"])
         if jobs is not None: jobs[job_id]["stage"] = "gpu_encode"
-        gpu_result = await run_single(input_path, job_id, "gpu", gpu_baseline)
+        gpu_result = await run_single(input_path, job_id, "gpu", gpu_baseline, custom_cmd_gpu)
     finally:
         LOCK_FILE.unlink(missing_ok=True)
         loop = asyncio.get_event_loop()
@@ -370,10 +395,132 @@ async def run_both_measurement(input_path: Path, job_id: str, jobs: dict = None)
         "scope": "Device layer only (GoS1 server). Network, CDN, CPE excluded.",
     }
 
-async def run_video_measurement_path(path: str, job_id: str, preset_key: str) -> dict:
+async def run_video_measurement_path(path: str, job_id: str, preset_key: str,
+                                      custom_cmd: str = None) -> dict:
     """Run measurement on an already-present file (pre-loaded content)."""
-    return await run_video_measurement(Path(path), job_id, preset_key)
+    return await run_video_measurement(Path(path), job_id, preset_key,
+                                       custom_cmd=custom_cmd)
 
-async def run_both_measurement_path(path: str, job_id: str) -> dict:
+async def run_both_measurement_path(path: str, job_id: str,
+                                    custom_cmd_cpu: str = None,
+                                    custom_cmd_gpu: str = None) -> dict:
     """Run both measurements on an already-present file (pre-loaded content)."""
-    return await run_both_measurement(Path(path), job_id)
+    return await run_both_measurement(Path(path), job_id,
+                                      custom_cmd_cpu=custom_cmd_cpu,
+                                      custom_cmd_gpu=custom_cmd_gpu)
+
+
+# --- Variance calibration ---
+
+async def run_variance_calibration(job_id: str, jobs: dict) -> dict:
+    """Run H264-CPU then H265-GPU on Meridian N times, compute coefficient of
+    variation across all ΔW readings, and update variance_pct in settings."""
+    s = cfg.load()
+    meridian = Path("/home/gos/wattlab/test_content/meridian_4k.mp4")
+    n_runs = int(s["variance_runs"])
+    cooldown = float(s["variance_cooldown_s"])
+    cpu_tpl = s["variance_cpu_cmd"]
+    gpu_tpl = s["variance_gpu_cmd"]
+
+    stopped = focus_mode_enter()
+    delta_w_values: list[float] = []
+
+    LOCK_FILE.write_text(job_id)
+    try:
+        for i in range(n_runs):
+            run_label = f"{i + 1}/{n_runs}"
+
+            # --- CPU pass ---
+            if jobs:
+                jobs[job_id]["stage"] = f"run_{run_label}_cpu_baseline"
+            base_cpu = await measure_baseline(polls=s["baseline_polls"])
+            w_base_cpu = base_cpu["w_base"]
+
+            out_cpu = UPLOAD_DIR / f"{job_id}_var_cpu_{i}.mp4"
+            cmd_cpu = apply_custom_cmd(cpu_tpl, meridian, out_cpu)
+
+            if jobs:
+                jobs[job_id]["stage"] = f"run_{run_label}_cpu_encode"
+            stop_cpu = asyncio.Event()
+            poll_cpu = asyncio.create_task(poll_during_task(stop_cpu))
+            await asyncio.get_event_loop().run_in_executor(None, transcode, cmd_cpu)
+            stop_cpu.set()
+            readings_cpu = await poll_cpu
+            out_cpu.unlink(missing_ok=True)
+
+            if readings_cpu:
+                w_task = sum(r["watts"] for r in readings_cpu) / len(readings_cpu)
+                delta_w_values.append(round(w_task - w_base_cpu, 3))
+
+            # --- Cooldown between CPU and GPU ---
+            if jobs:
+                jobs[job_id]["stage"] = f"run_{run_label}_cooldown"
+            await asyncio.sleep(cooldown)
+
+            # --- GPU pass ---
+            if jobs:
+                jobs[job_id]["stage"] = f"run_{run_label}_gpu_baseline"
+            base_gpu = await measure_baseline(polls=s["baseline_polls"])
+            w_base_gpu = base_gpu["w_base"]
+
+            out_gpu = UPLOAD_DIR / f"{job_id}_var_gpu_{i}.mp4"
+            cmd_gpu = apply_custom_cmd(gpu_tpl, meridian, out_gpu)
+
+            if jobs:
+                jobs[job_id]["stage"] = f"run_{run_label}_gpu_encode"
+            stop_gpu = asyncio.Event()
+            poll_gpu = asyncio.create_task(poll_during_task(stop_gpu))
+            await asyncio.get_event_loop().run_in_executor(None, transcode, cmd_gpu)
+            stop_gpu.set()
+            readings_gpu = await poll_gpu
+            out_gpu.unlink(missing_ok=True)
+
+            if readings_gpu:
+                w_task2 = sum(r["watts"] for r in readings_gpu) / len(readings_gpu)
+                delta_w_values.append(round(w_task2 - w_base_gpu, 3))
+
+            # --- Inter-run cooldown (skip after last run) ---
+            if i < n_runs - 1:
+                if jobs:
+                    jobs[job_id]["stage"] = f"run_{run_label}_inter_cooldown"
+                await asyncio.sleep(cooldown)
+
+    finally:
+        LOCK_FILE.unlink(missing_ok=True)
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, focus_mode_exit, stopped)
+
+    if jobs:
+        jobs[job_id]["stage"] = "computing"
+
+    # Compute coefficient of variation across all ΔW readings
+    n = len(delta_w_values)
+    cv_pct = None
+    std_dw = None
+    mean_dw = None
+    if n >= 2:
+        mean_dw = sum(delta_w_values) / n
+        variance = sum((v - mean_dw) ** 2 for v in delta_w_values) / (n - 1)
+        std_dw = variance ** 0.5
+        cv_pct = round(std_dw / max(abs(mean_dw), 0.001) * 100, 2) if mean_dw else None
+
+    result = {
+        "runs_completed": n,
+        "delta_w_values": delta_w_values,
+        "mean_delta_w": round(mean_dw, 3) if mean_dw is not None else None,
+        "std_delta_w": round(std_dw, 3) if std_dw is not None else None,
+        "cv_pct": cv_pct,
+        "variance_updated": False,
+    }
+
+    if cv_pct is not None:
+        current = cfg.load()
+        current["variance_pct"] = cv_pct
+        cfg.save(current)
+        result["variance_updated"] = True
+
+    if jobs:
+        jobs[job_id]["stage"] = "done"
+        jobs[job_id]["variance_result"] = result
+
+    return result

@@ -62,6 +62,7 @@ def to_csv(job_type: str, data: dict) -> str:
             "job_id", "saved_at", "mode", "preset", "duration_s",
             "w_base", "w_task", "delta_w", "delta_e_wh", "poll_count", "confidence",
             "cpu_base", "cpu_peak", "gpu_base", "gpu_peak", "gpu_ppt_mean_w",
+            "ffmpeg_cmd",
         ]
         rows = _video_rows(data)
     else:
@@ -232,6 +233,7 @@ def _video_result_row(common: dict, r: dict) -> dict:
         "cpu_base": t.get("cpu_base"), "cpu_peak": t.get("cpu_peak"),
         "gpu_base": t.get("gpu_base"), "gpu_peak": t.get("gpu_peak"),
         "gpu_ppt_mean_w": t.get("gpu_ppt_mean_w"),
+        "ffmpeg_cmd": r.get("transcode", {}).get("ffmpeg_cmd", ""),
     }
 
 

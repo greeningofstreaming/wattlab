@@ -314,6 +314,7 @@ async def index():
         <div class="nav-util">
             <a href="/queue-status">⏱ Queue</a>
             <a href="/settings">⚙ Settings</a>
+            <a href="/methodology">📐 Methodology</a>
         </div>
     </div>
     {_FOOTER}
@@ -327,7 +328,8 @@ async def power_json():
 # --- Video page ---
 
 @app.get("/video", response_class=HTMLResponse)
-async def video_page():
+async def video_page(request: Request):
+    is_lan = _is_local(request)
     queue_depth = len(pending_queue) + (1 if current_job_id else 0)
     busy_banner = (f'<div style="background:#333;color:#ffaa00;padding:0.75rem 1rem;'
                    f'margin-bottom:1rem;font-size:0.85rem">'
@@ -494,6 +496,12 @@ async def video_page():
         </div>
     </div>
 
+    <div id="cmd-preview-area" style="margin-bottom:1.5rem;display:none">
+        <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+                    letter-spacing:0.05em;margin-bottom:0.5rem">ffmpeg command</div>
+        <div id="cmd-preview-box"></div>
+    </div>
+
     <div id="upload-area">
         <input type="file" id="fileInput" accept=".mp4,.mov,.mkv,.avi,.webm,.ts">
     </div>
@@ -503,8 +511,10 @@ async def video_page():
     <div id="prev-runs" style="margin-top:2rem;border-top:1px solid #111;padding-top:1.5rem"></div>
 
     <script>
+    const IS_LAN = {'true' if is_lan else 'false'};
     let selectedPreset = 'both';
     let selectedSource = 'upload';
+    let customCmds = {{}};   // {{single: str}} or {{cpu: str, gpu: str}}
 
     function selectSource(src) {{
         selectedSource = src;
@@ -512,6 +522,58 @@ async def video_page():
             src === 'upload' ? 'block' : 'none';
         document.getElementById('runBtn').textContent =
             src === 'upload' ? 'Upload & Measure' : 'Run Measurement';
+    }}
+
+    function _cmdBox(id, value) {{
+        if (IS_LAN) {{
+            return '<textarea id="' + id + '" rows="3" spellcheck="false" '
+                + 'style="width:100%;background:#0d0d0d;border:1px solid #2a2a2a;'
+                + 'color:#aaa;font-family:monospace;font-size:0.72rem;'
+                + 'padding:0.5rem;resize:vertical;line-height:1.5">'
+                + value + '</textarea>';
+        }} else {{
+            return '<div style="background:#0d0d0d;border:1px solid #1a1a1a;'
+                + 'padding:0.5rem;font-family:monospace;font-size:0.72rem;'
+                + 'color:#555;word-break:break-all;line-height:1.5">' + value + '</div>';
+        }}
+    }}
+
+    async function fetchCmdPreview(preset) {{
+        const area = document.getElementById('cmd-preview-area');
+        const box  = document.getElementById('cmd-preview-box');
+        try {{
+            const resp = await fetch('/video/preview-cmd?preset=' + preset);
+            const data = await resp.json();
+            if (data.mode === 'both') {{
+                customCmds = {{cpu: data.cpu_cmd, gpu: data.gpu_cmd}};
+                box.innerHTML =
+                    '<div style="color:#444;font-size:0.7rem;margin-bottom:0.3rem">CPU (H.264)</div>'
+                    + _cmdBox('cmd_cpu', data.cpu_cmd)
+                    + '<div style="color:#444;font-size:0.7rem;margin:0.5rem 0 0.3rem">GPU (H.264)</div>'
+                    + _cmdBox('cmd_gpu', data.gpu_cmd);
+            }} else {{
+                customCmds = {{single: data.cmd}};
+                box.innerHTML = _cmdBox('cmd_single', data.cmd);
+            }}
+            area.style.display = 'block';
+        }} catch(e) {{
+            box.innerHTML = '<div style="color:#555;font-size:0.72rem">Could not load preview</div>';
+            area.style.display = 'block';
+        }}
+    }}
+
+    function _getCustomCmds() {{
+        if (selectedPreset === 'both') {{
+            const cpu = document.getElementById('cmd_cpu');
+            const gpu = document.getElementById('cmd_gpu');
+            return {{
+                custom_cmd_cpu: cpu ? cpu.value : '',
+                custom_cmd_gpu: gpu ? gpu.value : '',
+            }};
+        }} else {{
+            const el = document.getElementById('cmd_single');
+            return {{ custom_cmd: el ? el.value : '' }};
+        }}
     }}
     let progressTimer = null;
     let elapsedTimer = null;
@@ -544,6 +606,7 @@ async def video_page():
         document.querySelectorAll('.preset').forEach(el => el.classList.remove('selected'));
         const el = document.getElementById('preset-' + key);
         if (el) el.classList.add('selected');
+        fetchCmdPreview(key);
     }}
 
     function renderProgress(jobId, mode, serverStage, watts) {{
@@ -571,6 +634,7 @@ async def video_page():
         let resp;
         let isUpload = false;
         try {{
+            const cmds = _getCustomCmds();
             if (selectedSource === 'upload') {{
                 isUpload = true;
                 const file = document.getElementById('fileInput').files[0];
@@ -580,12 +644,14 @@ async def video_page():
                 const form = new FormData();
                 form.append('file', file);
                 form.append('preset', selectedPreset);
+                for (const [k, v] of Object.entries(cmds)) form.append(k, v);
                 resp = await fetch('/video/upload', {{ method: 'POST', body: form }});
             }} else {{
                 status.innerHTML = '<div style="color:#ffaa00">Starting measurement on ' + selectedSource + '...</div>';
                 const form = new FormData();
                 form.append('source_key', selectedSource);
                 form.append('preset', selectedPreset);
+                for (const [k, v] of Object.entries(cmds)) form.append(k, v);
                 resp = await fetch('/video/use-source', {{ method: 'POST', body: form }});
             }}
 
@@ -816,6 +882,7 @@ async def video_page():
     }}
 
     loadPrevRuns();
+    fetchCmdPreview(selectedPreset);
     const _resumeJob = new URLSearchParams(location.search).get('job');
     if (_resumeJob) {{ pollJob(_resumeJob, 'both'); }}
     </script>
@@ -827,15 +894,19 @@ async def video_page():
 
 # --- Job runner ---
 
-async def run_job(job_id: str, input_path: Path, preset: str, delete_after: bool = True):
+async def run_job(job_id: str, input_path: Path, preset: str, delete_after: bool = True,
+                  custom_cmd: str = None, custom_cmd_cpu: str = None, custom_cmd_gpu: str = None):
     try:
-        jobs[job_id] = {"status": "running", "stage": "starting"}
+        jobs[job_id].update({"status": "running", "stage": "starting"})
         if preset == "both":
-            result = await run_both_measurement(input_path, job_id, jobs)
+            result = await run_both_measurement(input_path, job_id, jobs,
+                                                custom_cmd_cpu=custom_cmd_cpu,
+                                                custom_cmd_gpu=custom_cmd_gpu)
         else:
-            result = await run_video_measurement(input_path, job_id, preset, jobs)
+            result = await run_video_measurement(input_path, job_id, preset, jobs,
+                                                 custom_cmd=custom_cmd)
         save_result("video", job_id, result)
-        jobs[job_id] = {"status": "done", "stage": "done", "result": result}
+        jobs[job_id].update({"status": "done", "stage": "done", "result": result})
     except Exception as e:
         jobs[job_id] = {"status": "error", "stage": "error", "error": str(e)}
     finally:
@@ -846,7 +917,10 @@ async def run_job(job_id: str, input_path: Path, preset: str, delete_after: bool
 @app.post("/video/use-source")
 async def use_preloaded_source(
     source_key: str = Form(...),
-    preset: str = Form("both")
+    preset: str = Form("both"),
+    custom_cmd: str = Form(None),
+    custom_cmd_cpu: str = Form(None),
+    custom_cmd_gpu: str = Form(None),
 ):
     if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "av1_cpu"):
         return JSONResponse({"error": "Invalid preset"}, status_code=400)
@@ -859,7 +933,10 @@ async def use_preloaded_source(
     label = f"Video — {preset} · {source['label']}"
 
     async def coro():
-        await run_job(job_id, source["path"], preset, False)
+        await run_job(job_id, source["path"], preset, False,
+                      custom_cmd=custom_cmd,
+                      custom_cmd_cpu=custom_cmd_cpu,
+                      custom_cmd_gpu=custom_cmd_gpu)
 
     position = enqueue(job_id, "video", label, coro)
     if position is None:
@@ -869,7 +946,10 @@ async def use_preloaded_source(
 @app.post("/video/upload")
 async def upload_video(
     file: UploadFile = File(...),
-    preset: str = Form("both")
+    preset: str = Form("both"),
+    custom_cmd: str = Form(None),
+    custom_cmd_cpu: str = Form(None),
+    custom_cmd_gpu: str = Form(None),
 ):
     if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "av1_cpu"):
         return JSONResponse({"error": "Invalid preset"}, status_code=400)
@@ -889,7 +969,10 @@ async def upload_video(
     label = f"Video — {preset} · {file.filename}"
 
     async def coro():
-        await run_job(job_id, input_path, preset, True)
+        await run_job(job_id, input_path, preset, True,
+                      custom_cmd=custom_cmd,
+                      custom_cmd_cpu=custom_cmd_cpu,
+                      custom_cmd_gpu=custom_cmd_gpu)
 
     position = enqueue(job_id, "video", label, coro)
     if position is None:
@@ -902,13 +985,51 @@ async def video_sources():
     return get_all_sources()
 
 
+@app.get("/video/preview-cmd")
+async def video_preview_cmd(preset: str = "both"):
+    from video import PRESETS, build_preset_cmd
+    placeholder_in = Path("{input}")
+    placeholder_out = Path("{output}")
+    if preset == "both":
+        cpu_cmd = " ".join(build_preset_cmd("cpu", placeholder_in, placeholder_out))
+        gpu_cmd = " ".join(build_preset_cmd("gpu", placeholder_in, placeholder_out))
+        return {"mode": "both", "cpu_cmd": cpu_cmd, "gpu_cmd": gpu_cmd}
+    elif preset in PRESETS:
+        cmd = " ".join(build_preset_cmd(preset, placeholder_in, placeholder_out))
+        return {"mode": "single", "cmd": cmd}
+    else:
+        return JSONResponse({"error": "Unknown preset"}, status_code=400)
+
+
+@app.post("/variance/run")
+async def variance_run(request: Request):
+    if not _is_local(request):
+        return JSONResponse({"error": "Forbidden — variance calibration is lab-only"}, status_code=403)
+    from video import run_variance_calibration
+    job_id = str(uuid.uuid4())[:8]
+    label = "Variance calibration — system offline"
+
+    async def coro():
+        try:
+            jobs[job_id].update({"status": "running", "stage": "starting"})
+            result = await run_variance_calibration(job_id, jobs)
+            jobs[job_id].update({"status": "done", "stage": "done", "result": result})
+        except Exception as e:
+            jobs[job_id] = {"status": "error", "stage": "error", "error": str(e)}
+
+    position = enqueue(job_id, "variance", label, coro)
+    if position is None:
+        return JSONResponse({"error": "Queue full — try again later."}, status_code=429)
+    return {"job_id": job_id, "queue_position": position}
+
+
 # --- LLM job runner ---
 
 async def run_llm_job(job_id: str, model_key: str, task_key: str,
                       repeats: int = 1, warm: bool = False, prompt: str = None,
                       device: str = "gpu"):
     try:
-        jobs[job_id] = {"status": "running", "stage": "baseline", "partial_response": ""}
+        jobs[job_id].update({"status": "running", "stage": "baseline", "partial_response": ""})
         if device == "both":
             result = await run_llm_both_measurement(
                 model_key, task_key, jobs, job_id, warm, prompt)
@@ -919,7 +1040,7 @@ async def run_llm_job(job_id: str, model_key: str, task_key: str,
             result = await run_llm_measurement(
                 model_key, task_key, jobs, job_id, warm, prompt, device)
         save_result("llm", job_id, result)
-        jobs[job_id] = {"status": "done", "stage": "done", "result": result}
+        jobs[job_id].update({"status": "done", "stage": "done", "result": result})
     except Exception as e:
         jobs[job_id] = {"status": "error", "stage": "error", "error": str(e)}
 
@@ -1622,8 +1743,8 @@ async def llm_run(
 async def run_llm_all_job(job_id: str, model_key: str, warm: bool, device: str):
     try:
         devices = ["cpu", "gpu"] if device == "both" else [device]
-        jobs[job_id] = {"status": "running", "stage": "baseline",
-                        "current_task": "T1", "current_device": devices[0], "partial_response": ""}
+        jobs[job_id].update({"status": "running", "stage": "baseline",
+                             "current_task": "T1", "current_device": devices[0], "partial_response": ""})
         dev_results = {}
         for dev in devices:
             task_results = {}
@@ -2414,6 +2535,40 @@ async def settings_page(request: Request):
                 f'{ctrl}<span style="color:#555;font-size:0.8rem">{unit}</span>'
                 f'</div></div>')
 
+    def slider_field(fid, val, min_, max_, step, unit, hint=""):
+        if local:
+            ctrl = (f'<input type="range" id="{fid}" min="{min_}" max="{max_}" step="{step}"'
+                    f' value="{val}"'
+                    f' oninput="document.getElementById(\'{fid}_disp\').textContent=this.value"'
+                    f' style="width:130px;accent-color:#00ff99;vertical-align:middle"> '
+                    f'<span id="{fid}_disp" style="font-family:monospace;color:#00ff99;'
+                    f'font-size:0.9rem;min-width:2.5rem;display:inline-block">{val}</span>')
+        else:
+            ctrl = f'<span style="font-family:monospace;color:#00ff99;font-size:0.95rem">{val}</span>'
+        hint_html = f'<div style="color:#333;font-size:0.72rem;margin-top:0.2rem">{hint}</div>' if hint else ""
+        return (f'<div style="display:flex;justify-content:space-between;align-items:center;'
+                f'padding:0.5rem 0;border-bottom:1px solid #0d0d0d;gap:1rem">'
+                f'<div><label style="color:#aaa;font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
+                f'{hint_html}</div>'
+                f'<div style="display:flex;align-items:center;gap:0.5rem">'
+                f'{ctrl}<span style="color:#555;font-size:0.8rem">{unit}</span>'
+                f'</div></div>')
+
+    def textarea_field(fid, val, hint="", rows=3):
+        if local:
+            ctrl = (f'<textarea id="{fid}" rows="{rows}" spellcheck="false"'
+                    f' style="width:100%;background:#0d0d0d;border:1px solid #222;'
+                    f'color:#888;font-family:monospace;font-size:0.72rem;'
+                    f'padding:0.4rem 0.5rem;resize:vertical;line-height:1.5">{val}</textarea>')
+        else:
+            ctrl = (f'<div style="background:#0d0d0d;border:1px solid #1a1a1a;padding:0.4rem 0.5rem;'
+                    f'font-family:monospace;font-size:0.72rem;color:#444;word-break:break-all;'
+                    f'line-height:1.5">{val}</div>')
+        hint_html = f'<div style="color:#333;font-size:0.72rem;margin-top:0.2rem;margin-bottom:0.3rem">{hint}</div>' if hint else ""
+        return (f'<div style="padding:0.5rem 0;border-bottom:1px solid #0d0d0d">'
+                f'<label style="color:#aaa;font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
+                f'{hint_html}{ctrl}</div>')
+
     notice = ('' if local else
               '<div style="background:#111;border-left:3px solid #555;padding:0.75rem 1rem;'
               'margin-bottom:1.5rem;font-size:0.82rem;color:#555">'
@@ -2454,18 +2609,41 @@ async def settings_page(request: Request):
     {field("llm_unload_settle_s", s['llm_unload_settle_s'], 1, 30, "s",   "wait after model unload before baseline")}
 
     <div class="section">Confidence thresholds</div>
-    {field("conf_green_delta_w",  s['conf_green_delta_w'],  0, 50,  "W",     "🟢 green ΔW threshold", step=0.5)}
-    {field("conf_green_polls",    s['conf_green_polls'],    1, 100, "polls", "🟢 green minimum polls")}
-    {field("conf_yellow_delta_w", s['conf_yellow_delta_w'], 0, 20,  "W",     "🟡 yellow ΔW threshold", step=0.5)}
-    {field("conf_yellow_polls",   s['conf_yellow_polls'],   1, 50,  "polls", "🟡 yellow minimum polls")}
+    {field("variance_pct",     s['variance_pct'],     0, 50,  "%",     "measured system variance — auto-updated by calibration", step=0.1)}
+    {field("variance_green_x", s['variance_green_x'], 1, 20,  "× noise", "🟢 ΔW must exceed this multiple of noise floor", step=0.5)}
+    {field("variance_yellow_x",s['variance_yellow_x'],1, 10,  "× noise", "🟡 ΔW must exceed this multiple of noise floor", step=0.5)}
+    {field("conf_green_polls", s['conf_green_polls'],  1, 100, "polls", "🟢 minimum poll count")}
+    {field("conf_yellow_polls",s['conf_yellow_polls'], 1, 50,  "polls", "🟡 minimum poll count")}
+
+    <div class="section">Variance calibration</div>
+    <div style="color:#444;font-size:0.75rem;line-height:1.6;margin-bottom:0.75rem">
+      Runs H.264 CPU then H.265 GPU on Meridian N times. Computes coefficient of
+      variation (σ/μ) across all ΔW readings and writes it to Variance % above.
+      Queue is blocked for the duration — label shows "Variance calibration — system offline".
+    </div>
+    {slider_field("variance_runs",      s['variance_runs'],      5,  100, 5,  "runs",    "number of H264-CPU + H265-GPU run pairs")}
+    {slider_field("variance_cooldown_s",s['variance_cooldown_s'],10, 300, 10, "s",       "cooldown between each run pair")}
+    {textarea_field("variance_cpu_cmd", s['variance_cpu_cmd'], "H.264 CPU command — {input} and {output} are substituted at runtime")}
+    {textarea_field("variance_gpu_cmd", s['variance_gpu_cmd'], "H.265 GPU command — {input} and {output} are substituted at runtime")}
+    {'<button onclick="runVarianceCalibration()" id="varCalBtn" style="background:#222;color:#00ff99;border:1px solid #00ff9944;padding:0.5rem 1.25rem;cursor:pointer;font-family:monospace;font-size:0.85rem;margin-top:0.75rem">▶ Run variance calibration</button><div id="var-cal-msg" style="margin-top:0.5rem;font-size:0.82rem"></div>' if local else '<div style="color:#333;font-size:0.78rem;margin-top:0.5rem">Calibration requires lab access.</div>'}
 
     {save_block}
     <script>
     async function saveSettings() {{
-        const fields = ['baseline_polls','video_cooldown_s','llm_rest_s','llm_unload_settle_s',
-                        'conf_green_delta_w','conf_green_polls','conf_yellow_delta_w','conf_yellow_polls'];
+        const num_fields = ['baseline_polls','video_cooldown_s','llm_rest_s','llm_unload_settle_s',
+                            'variance_pct','variance_green_x','variance_yellow_x',
+                            'conf_green_polls','conf_yellow_polls',
+                            'variance_runs','variance_cooldown_s'];
+        const str_fields = ['variance_cpu_cmd','variance_gpu_cmd'];
         const body = {{}};
-        for (const f of fields) body[f] = parseFloat(document.getElementById(f).value);
+        for (const f of num_fields) {{
+            const el = document.getElementById(f);
+            if (el) body[f] = parseFloat(el.value);
+        }}
+        for (const f of str_fields) {{
+            const el = document.getElementById(f);
+            if (el) body[f] = el.value;
+        }}
         try {{
             const resp = await fetch('/settings', {{
                 method: 'POST',
@@ -2483,6 +2661,30 @@ async def settings_page(request: Request):
         }} catch(e) {{
             document.getElementById('msg').innerHTML =
                 '<span style="color:#ff4400">Failed: ' + e + '</span>';
+        }}
+    }}
+
+    async function runVarianceCalibration() {{
+        const btn = document.getElementById('varCalBtn');
+        const msg = document.getElementById('var-cal-msg');
+        if (!btn) return;
+        btn.disabled = true;
+        msg.innerHTML = '<span style="color:#ffaa00">Queuing calibration job...</span>';
+        try {{
+            const resp = await fetch('/variance/run', {{method: 'POST'}});
+            const data = await resp.json();
+            if (data.job_id) {{
+                msg.innerHTML = '<span style="color:#00ff99">Job ' + data.job_id
+                    + ' queued (position ' + data.queue_position + '). '
+                    + '<a href="/queue-status" style="color:#00ff99">View queue →</a>'
+                    + '</span>';
+            }} else {{
+                msg.innerHTML = '<span style="color:#ff4400">Error: ' + JSON.stringify(data) + '</span>';
+                btn.disabled = false;
+            }}
+        }} catch(e) {{
+            msg.innerHTML = '<span style="color:#ff4400">Failed: ' + e + '</span>';
+            btn.disabled = false;
         }}
     }}
     </script>
@@ -3891,3 +4093,539 @@ load();
 @app.get("/demo", response_class=HTMLResponse)
 async def demo_page():
     return _DEMO_HTML
+
+
+_METHODOLOGY_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WattLab — Methodology</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --surface-hover: #1a1a1a;
+    --border: #2a2a2a;
+    --text: #e0e0e0;
+    --text-dim: #888;
+    --accent: #00ff99;
+    --accent-dim: rgba(0,255,153,0.15);
+    --warning: #ffaa00;
+    --red: #ff4444;
+    --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+    --sans: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+    padding: 0;
+  }
+
+  /* ── Header bar (matches other WattLab pages) ── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .topbar img { height: 32px; border-radius: 50%; }
+  .topbar .title {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+  }
+  .topbar .back {
+    margin-left: auto;
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 13px;
+    font-family: var(--mono);
+  }
+  .topbar .back:hover { color: var(--accent); }
+
+  /* ── Main content ── */
+  .content {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-size: 22px;
+    color: var(--accent);
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+  }
+  .subtitle {
+    color: var(--text-dim);
+    font-size: 13px;
+    font-family: var(--mono);
+    margin-bottom: 36px;
+  }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--accent);
+    margin-top: 40px;
+    margin-bottom: 16px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: 0.3px;
+  }
+
+  h3 {
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    margin-top: 24px;
+    margin-bottom: 8px;
+  }
+
+  p { margin-bottom: 14px; }
+
+  /* ── Scope banner ── */
+  .scope-banner {
+    background: var(--accent-dim);
+    border: 1px solid rgba(0,255,153,0.3);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin-bottom: 32px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--accent);
+  }
+  .scope-banner strong { color: #fff; }
+
+  /* ── Protocol steps ── */
+  .protocol-steps {
+    counter-reset: step;
+    list-style: none;
+    padding: 0;
+    margin: 16px 0 20px;
+  }
+  .protocol-steps li {
+    counter-increment: step;
+    position: relative;
+    padding: 12px 16px 12px 52px;
+    margin-bottom: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .protocol-steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 16px;
+    top: 12px;
+    width: 24px;
+    height: 24px;
+    background: var(--accent-dim);
+    border: 1px solid rgba(0,255,153,0.3);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .protocol-steps li code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--accent);
+  }
+
+  /* ── Confidence table ── */
+  .confidence-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 20px;
+    font-size: 14px;
+  }
+  .confidence-table th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .confidence-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .confidence-table tr:last-child td { border-bottom: none; }
+  .badge { font-size: 16px; }
+
+  /* ── Hardware spec table ── */
+  .hw-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 20px;
+    font-size: 14px;
+  }
+  .hw-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .hw-table td:first-child {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    width: 160px;
+    white-space: nowrap;
+  }
+
+  /* ── Info callout ── */
+  .callout {
+    background: var(--surface);
+    border-left: 3px solid var(--warning);
+    padding: 14px 18px;
+    margin: 16px 0 20px;
+    border-radius: 0 5px 5px 0;
+    font-size: 14px;
+  }
+  .callout.green { border-left-color: var(--accent); }
+
+  /* ── Formula block ── */
+  .formula {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 16px 20px;
+    margin: 14px 0 20px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--text);
+    overflow-x: auto;
+  }
+  .formula .label {
+    color: var(--text-dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .formula .var { color: var(--accent); }
+
+  /* ── Open questions ── */
+  .open-q {
+    padding: 10px 16px;
+    margin-bottom: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 14px;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+  }
+  .open-q .marker {
+    color: var(--warning);
+    font-family: var(--mono);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  /* ── Section links (bottom nav) ── */
+  .section-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 28px;
+  }
+  .section-nav a {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    text-decoration: none;
+    padding: 5px 10px;
+    background: var(--accent-dim);
+    border: 1px solid rgba(0,255,153,0.2);
+    border-radius: 4px;
+  }
+  .section-nav a:hover {
+    background: rgba(0,255,153,0.25);
+  }
+
+  /* ── Timestamp footer ── */
+  .footer-note {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.6;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .content { padding: 24px 16px 60px; }
+    h1 { font-size: 18px; }
+    .protocol-steps li { padding-left: 44px; }
+    .hw-table td:first-child { width: 120px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <a href="https://greeningofstreaming.org" target="_blank">
+    <img src="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png" alt="GoS">
+  </a>
+  <span class="title">WattLab · Methodology</span>
+  <a href="/" class="back">&larr; Home</a>
+</div>
+
+<div class="content">
+
+  <h1>Measurement Methodology</h1>
+  <p class="subtitle">How WattLab measures the energy cost of compute tasks &mdash; and what it doesn&rsquo;t measure.</p>
+
+  <div class="section-nav">
+    <a href="#scope">Scope</a>
+    <a href="#principle">Principle</a>
+    <a href="#protocol">Protocol</a>
+    <a href="#energy">Energy maths</a>
+    <a href="#confidence">Confidence</a>
+    <a href="#hardware">Hardware</a>
+    <a href="#tests">Test types</a>
+    <a href="#limits">Limitations</a>
+    <a href="#open">Open questions</a>
+  </div>
+
+  <h2 id="scope">Scope</h2>
+
+  <div class="scope-banner">
+    <strong>Device layer only.</strong><br>
+    All measurements cover the GoS1 server: CPU, GPU, RAM, storage, fans, motherboard.<br>
+    Network, CDN, client devices (CPE), and production/storage infrastructure are explicitly excluded.<br>
+    LLM measurements do not include amortised training cost.
+  </div>
+
+  <p>WattLab measures what happens inside one machine when it performs a real task. This is intentionally narrow. The energy cost of streaming is distributed across data centres, networks, and consumer devices &mdash; each with different measurement challenges and attribution problems. We start with the layer we can measure directly, at the wall, with no modelling assumptions.</p>
+
+  <p>This scoping decision means WattLab results are <em>not</em> lifecycle assessments and should not be cited as total-cost-of-delivery figures. They answer a specific question: how much additional energy does this server draw to perform this task, above its idle baseline?</p>
+
+  <h2 id="principle">Measurement Principle</h2>
+
+  <p>WattLab uses <strong>wall-power delta measurement</strong>: the difference between what the server draws at idle and what it draws under load, captured by an external smart plug.</p>
+
+  <div class="callout green">
+    The plug measures the entire system &mdash; not a model, not a software estimate, not a per-component reading. If the CPU fan spins faster, the PSU runs less efficiently, or the GPU draws from the 12V rail, it&rsquo;s all in the number.
+  </div>
+
+  <p>This follows the GoS <strong>REM (Remote Energy Measurement)</strong> approach: real devices, real workloads, measured externally, at polling intervals short enough to capture the task&rsquo;s energy profile.</p>
+
+  <h2 id="protocol">Measurement Protocol</h2>
+
+  <p>Every test in WattLab &mdash; video, LLM, image generation, RAG &mdash; follows the same core protocol:</p>
+
+  <ol class="protocol-steps">
+    <li>
+      <strong>Focus mode.</strong> Suppress background system tasks (apt, cron, man-db, fwupd, etc.) that would introduce energy noise. Managed via <code>systemctl stop</code> with dedicated sudoers rules.
+    </li>
+    <li>
+      <strong>Model unload</strong> (LLM/RAG only). Send <code>keep_alive=0</code> to Ollama and wait 3 seconds for GPU memory release. Ensures a cold start when cold-inference mode is selected.
+    </li>
+    <li>
+      <strong>Baseline capture.</strong> Poll the Tapo P110 smart plug at 1-second intervals for a configurable period (default: 10 polls). The mean of these readings becomes W<sub>base</sub> &mdash; the server&rsquo;s idle power draw.
+    </li>
+    <li>
+      <strong>Lock.</strong> Acquire <code>/tmp/gos-measure.lock</code> to prevent concurrent measurements from overlapping. A FIFO queue manages waiting jobs.
+    </li>
+    <li>
+      <strong>Execute task.</strong> Run the actual workload (ffmpeg, Ollama inference, SD-Turbo diffusion) while continuing to poll the P110 at 1-second intervals. Thermal sensors (CPU Tctl, GPU junction, GPU PPT) are read in parallel.
+    </li>
+    <li>
+      <strong>Compute energy.</strong> Calculate delta power, total energy, and per-unit metrics (see formulas below).
+    </li>
+    <li>
+      <strong>Persist.</strong> Write the full result to a JSON file &mdash; parameters, energy report, raw poll data, thermal readings, confidence flag. Every result is reproducible and exportable.
+    </li>
+    <li>
+      <strong>Focus exit.</strong> Restart suppressed system timers in parallel (via ThreadPoolExecutor) to minimise downtime.
+    </li>
+  </ol>
+
+  <p>Between sequential runs (e.g., CPU vs GPU comparison), a configurable cooldown (default: 60 seconds) allows the system to return to thermal equilibrium.</p>
+
+  <h2 id="energy">Energy Calculation</h2>
+
+  <div class="formula">
+    <span class="label">Delta power (average above idle)</span>
+    <span class="var">&Delta;W</span> = mean(<span class="var">W<sub>polls</sub></span>) &minus; <span class="var">W<sub>base</sub></span>
+  </div>
+
+  <div class="formula">
+    <span class="label">Total energy consumed by task</span>
+    <span class="var">&Delta;E</span> = <span class="var">&Delta;W</span> &times; (<span class="var">&Delta;t</span> / 3600) &nbsp; [Wh]
+    <br><br>
+    where <span class="var">&Delta;t</span> = task duration in seconds
+  </div>
+
+  <div class="formula">
+    <span class="label">Per-token energy (LLM / RAG)</span>
+    <span class="var">E<sub>token</sub></span> = <span class="var">&Delta;E</span> / <span class="var">N<sub>tokens</sub></span> &nbsp; [mWh/token]
+  </div>
+
+  <div class="formula">
+    <span class="label">Per-image energy (image generation)</span>
+    <span class="var">E<sub>image</sub></span> = <span class="var">&Delta;E</span> / <span class="var">N<sub>images</sub></span> &nbsp; [Wh/image]
+  </div>
+
+  <p>All formulas use wall-power from the P110 (system-level), not component-level readings. The GPU&rsquo;s self-reported power (PPT via <code>amdgpu</code>) is captured for reference but is not used in the primary energy calculation &mdash; it covers only the GPU die, not the full system delta (CPU, RAM, drives, fans, PSU losses).</p>
+
+  <h2 id="confidence">Confidence Framework</h2>
+
+  <p>Every WattLab result carries a traffic-light confidence flag based on a <strong>variance-relative signal-to-noise ratio</strong>. The noise floor is not assumed &mdash; it is characterised empirically by running the same workload repeatedly and computing the coefficient of variation (CV = &sigma;/&mu;) across all &Delta;W readings. This CV, expressed as a percentage of baseline power, captures total system measurement noise: P110 quantisation, Wi-Fi polling jitter, background OS processes, and thermal drift combined.</p>
+
+  <p>The current system variance and threshold multipliers are configurable in Settings and can be updated via the built-in calibration tool (H.264 CPU &rarr; cooldown &rarr; H.265 GPU, repeated N times on Meridian).</p>
+
+  <table class="confidence-table">
+    <tr>
+      <th>Flag</th>
+      <th>Meaning</th>
+      <th>Criteria (defaults)</th>
+    </tr>
+    <tr>
+      <td><span class="badge">&#x1F7E2;</span></td>
+      <td><strong>Repeatable</strong> &mdash; Signal clearly exceeds the measured noise floor with enough poll samples to be reliable.</td>
+      <td>&Delta;W &gt; 5 &times; noise<sub>W</sub> and &ge; 10 polls</td>
+    </tr>
+    <tr>
+      <td><span class="badge">&#x1F7E1;</span></td>
+      <td><strong>Early insight</strong> &mdash; Signal is detectable above noise but more data or a longer run would strengthen the result.</td>
+      <td>&Delta;W &ge; 2 &times; noise<sub>W</sub> or &ge; 5 polls</td>
+    </tr>
+    <tr>
+      <td><span class="badge">&#x1F534;</span></td>
+      <td><strong>Need more data</strong> &mdash; Signal is at or below the noise floor; result cannot be reliably distinguished from measurement variance.</td>
+      <td>Below yellow threshold</td>
+    </tr>
+  </table>
+
+  <div class="formula">
+    <span class="label">Noise floor (watts) from configured variance</span>
+    <span class="var">noise<sub>W</sub></span> = (<span class="var">variance_pct</span> / 100) &times; <span class="var">W<sub>base</sub></span>
+  </div>
+
+  <div class="callout green">
+    <strong>Why variance-relative thresholds?</strong> Fixed watt thresholds (e.g. &ldquo;&Delta;W &gt; 5W&rdquo;) do not account for the actual noise of the measurement system on a given day. A server with high background process noise requires a larger signal to be trustworthy. By anchoring thresholds to empirically measured variance, the confidence flag reflects real signal quality rather than an assumed noise floor.
+  </div>
+
+  <div class="callout">
+    <strong>P110 and total system noise:</strong> The Tapo P110 smart plug contributes hardware quantisation noise (~1W resolution when polled via local API). However, the dominant noise sources in practice are OS background processes (apt, cron, systemd timers) and thermal drift between runs. Focus mode suppresses the worst offenders, but residual variance remains. The variance calibration process measures this combined noise empirically and stores it as the reference for all confidence calculations.
+  </div>
+
+  <p>The confidence framework follows GoS&rsquo;s broader principle: <em>if it can&rsquo;t be measured, it shouldn&rsquo;t be asserted.</em> A &#x1F534; result is not a failure &mdash; it&rsquo;s an honest signal that the measurement instrument isn&rsquo;t sensitive enough for that task. Publishing it transparently is more useful than hiding it.</p>
+
+  <h2 id="hardware">Hardware Disclosure</h2>
+
+  <p>All results are tied to specific hardware. Different CPUs, GPUs, RAM configurations, and PSU efficiencies will produce different numbers. WattLab results should always be cited with their hardware context.</p>
+
+  <table class="hw-table">
+    <tr><td>Server</td><td>GoS1 &mdash; custom build, Ubuntu 24, kernel 6.17</td></tr>
+    <tr><td>CPU</td><td>AMD Ryzen 9 7900, 24 cores (12C/24T), 65W TDP</td></tr>
+    <tr><td>GPU</td><td>AMD Radeon RX 7800 XT, 16GB VRAM (11.1GB usable), VAAPI + ROCm</td></tr>
+    <tr><td>RAM</td><td>61 GB DDR5</td></tr>
+    <tr><td>Storage</td><td>457 GB (NVMe)</td></tr>
+    <tr><td>Idle power</td><td>~51&ndash;54W (stable), occasional drift to 58W</td></tr>
+    <tr><td>Measurement</td><td>Tapo P110 smart plug, 1-second polling via local API (tapo 0.8.12)</td></tr>
+    <tr><td>Video</td><td>ffmpeg 6.1.1 &mdash; libx264, libx265, libaom-av1 (CPU); h264_vaapi, hevc_vaapi, av1_vaapi (GPU)</td></tr>
+    <tr><td>LLM</td><td>Ollama 0.20.2 &mdash; TinyLlama 1.1B, Mistral 7B (CPU + ROCm GPU)</td></tr>
+    <tr><td>Image</td><td>SD-Turbo via PyTorch + diffusers (CPU + ROCm GPU)</td></tr>
+  </table>
+
+  <h2 id="tests">Test Types</h2>
+
+  <h3>Video transcoding</h3>
+  <p>Transcode a source file (default: Netflix Meridian 4K, CC BY 4.0) to a target codec and resolution. Measures the energy cost of the encode pipeline including decode, colour-space conversion, and encode. Supports CPU vs GPU comparison: both paths are run sequentially with a cooldown between them, and results are presented side by side.</p>
+  <p>Available presets: H.264 (CRF 23 / QP 23), H.265 (CRF 28 / QP 28), AV1 (CRF 35 / QP 35). CPU encoders use constant-quality rate control; GPU encoders use fixed QP. The ffmpeg command used for each run is logged in the result JSON for full reproducibility.</p>
+
+  <div class="callout">
+    <strong>Open item:</strong> Confirming that CPU and GPU presets produce comparable output quality (same effective bitrate, GOP structure, profile level) requires a dedicated working session. Current results compare time and energy but the quality dimension is not yet controlled. This is noted on the roadmap.
+  </div>
+
+  <h3>LLM inference</h3>
+  <p>Run a language model on a fixed prompt and measure energy per token. Supports cold inference (model unloaded before each run, measuring load + inference cost) and warm inference (model pre-loaded, measuring steady-state cost). Batch mode runs the prompt multiple times in sequence, with a configurable rest period between iterations, and reports the aggregate.</p>
+  <p>Prompts are editable and saved in the result JSON. Streaming output is displayed word-by-word as proof that inference is happening live. The mWh/token metric divides total energy by total tokens generated.</p>
+
+  <h3>Image generation</h3>
+  <p>Generate images from text prompts using Stable Diffusion Turbo (8 inference steps, 512&times;512). A random colour/mood modifier is appended to the prompt on each run to demonstrate that generation is live, not cached. GPU mode generates a batch of images in a single measurement window for reliable P110 capture.</p>
+
+  <h3>RAG (Retrieval-Augmented Generation)</h3>
+  <p>Compare three modes of LLM inference: baseline (no retrieval), RAG with 3 context chunks, and RAG with 8 context chunks. Uses ChromaDB with sentence-transformer embeddings to retrieve relevant passages from a document corpus before prompting the LLM. The &ldquo;Compare 3 modes&rdquo; function runs all three sequentially with fresh baselines, producing side-by-side energy comparisons.</p>
+
+  <h2 id="limits">Known Limitations</h2>
+
+  <div class="open-q"><span class="marker">&#9658;</span><span><strong>P110 temporal resolution.</strong> 1-second polling means tasks shorter than ~5 seconds produce few data points. Very fast models (e.g., TinyLlama single inference at 1&ndash;4 seconds) are at the edge of measurability. Batching mitigates this but changes what&rsquo;s being measured (batch cost, not single-inference cost).</span></div>
+
+  <div class="open-q"><span class="marker">&#9658;</span><span><strong>P110 power resolution.</strong> The ~&plusmn;1W noise floor means low-delta tasks (e.g., idle audio processing, lightweight network operations) cannot be reliably measured with this instrument.</span></div>
+
+  <div class="open-q"><span class="marker">&#9658;</span><span><strong>Single server.</strong> All results are from one machine. Generalisability to other hardware configurations is unknown without cross-platform measurement.</span></div>
+
+  <div class="open-q"><span class="marker">&#9658;</span><span><strong>Baseline drift.</strong> The server&rsquo;s idle power occasionally drifts from ~51W to ~58W (thermal state, background processes). The per-run baseline capture mitigates this, but it introduces variance between runs taken at different times.</span></div>
+
+  <div class="open-q"><span class="marker">&#9658;</span><span><strong>PSU efficiency curve.</strong> Wall power includes PSU conversion losses, which are non-linear (PSUs are less efficient at low and very high loads). Two tasks that consume the same <em>internal</em> power may report different wall-power deltas depending on where they sit on the PSU efficiency curve.</span></div>
+
+  <div class="open-q"><span class="marker">&#9658;</span><span><strong>CPU thermal cross-talk.</strong> During GPU-intensive tasks, the CPU temperature rises more than during CPU-only tasks of comparable intensity. This may affect energy attribution between components. Under investigation.</span></div>
+
+  <h2 id="open">Open Questions</h2>
+
+  <p>These are questions WattLab has surfaced but not yet answered. They are published here in the interest of transparency.</p>
+
+  <div class="open-q"><span class="marker">?</span><span><strong>Confidence multipliers.</strong> The 5&times; / 2&times; noise multipliers for &#x1F7E2;/&#x1F7E1; are currently set by judgement. A working session with the measurement team is planned to derive statistically grounded values from repeated calibration runs across different workloads and thermal states.</span></div>
+
+  <div class="open-q"><span class="marker">?</span><span><strong>Transcoding quality equivalence.</strong> CPU and GPU presets use different rate-control modes (CRF vs QP). Confirming output quality equivalence (VMAF, bitrate, GOP) is needed before energy comparisons can be fully apples-to-apples.</span></div>
+
+  <div class="open-q"><span class="marker">?</span><span><strong>GPU energy crossover point.</strong> On H.264, the GPU is ~34% faster but uses ~10% more energy. At what clip duration or complexity does GPU become more energy-efficient? Is this codec-dependent?</span></div>
+
+  <div class="open-q"><span class="marker">?</span><span><strong>LLM batch size effect.</strong> Does mWh/token change as batch count increases (thermal saturation, memory pressure)? Are the first and last runs in a batch energetically equivalent?</span></div>
+
+  <div class="open-q"><span class="marker">?</span><span><strong>RAG retrieval overhead.</strong> How much of the RAG energy delta is embedding lookup vs. increased context length? Can these be separated?</span></div>
+
+  <div class="open-q"><span class="marker">?</span><span><strong>Cross-platform comparability.</strong> How should results from different hardware be compared? Normalisation by TDP? By performance tier? By workload-equivalent output quality?</span></div>
+
+  <div class="footer-note">
+    WattLab is built and maintained by <a href="https://greeningofstreaming.org" style="color:var(--accent);text-decoration:none;">Greening of Streaming</a>, a French NGO (loi 1901).<br>
+    Methodology version 0.1 &middot; April 2026 &middot; Feedback: bs@ctoic.net<br>
+    Source: <a href="https://github.com/greeningofstreaming/wattlab" style="color:var(--accent);text-decoration:none;">github.com/greeningofstreaming/wattlab</a>
+  </div>
+
+</div>
+</body>
+</html>"""
+
+
+@app.get("/methodology", response_class=HTMLResponse)
+async def methodology_page():
+    return _METHODOLOGY_HTML

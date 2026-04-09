@@ -1,6 +1,7 @@
 # WattLab — Claude Code Context File
 # Auto-loaded by Claude Code. Keep this current.
-# Last updated: 2026-04-06
+# Last updated: 2026-04-09
+# See also: GOS1_INFRA.md — server infrastructure, Nextcloud backup, personal stack context
 
 ## Project Identity
 - **Name:** WattLab
@@ -21,11 +22,11 @@
 - OS: Ubuntu 24, kernel 6.17
 - CPU: AMD Ryzen 9 7900, 24 cores
 - GPU: AMD Radeon RX 7800 XT — VAAPI (video) + ROCm (AI), 12GB VRAM
-- RAM: 61GB · Disk: 457GB, 308GB free
+- RAM: 61GB · Disk: 457GB, 221GB free (April 2026)
 - Python: 3.12.3 · Node: 20.x
 - Claude Code: `~/.npm-global/bin/claude`, authenticated as nebul2
 - Git: bs@ctoic.net / nebul2
-- SSH users: simon, tania, dom, gos (owner)
+- SSH users: simon, tania, dom, marisol, gos (owner)
 - External: `ssh -p 2222 user@gos1.duckdns.org`
 - Idle power: ~51-54W (stable), occasional drift to 58W
 
@@ -78,7 +79,7 @@ wattlab/
     ├── llm.py                    # Ollama inference + P110 measurement
     ├── image_gen.py              # SD-Turbo CPU diffusion + P110 measurement
     ├── persist.py                # Flat-file result storage + CSV/JSON export
-    ├── settings.py               # Lab config (8 params, settings.json)
+    ├── settings.py               # Lab config (15 params, settings.json)
     └── sources.py                # Pre-loaded test content registry
 ```
 
@@ -99,9 +100,12 @@ man-db, motd-news, update-notifier-download
 Sudoers: `/etc/sudoers.d/wattlab-focus`
 
 ## Traffic Light Confidence
-- 🟢 Repeatable: ΔW > 5W, ≥10 polls
-- 🟡 Early insight: ΔW ≥ 2W or ≥5 polls
-- 🔴 Need more data: ΔW < 2W
+Variance-relative thresholds (Session 11). `noise_w = variance_pct/100 × w_base`
+- 🟢 Repeatable: ΔW > variance_green_x × noise_w AND ≥conf_green_polls polls (defaults: 5×, 10 polls)
+- 🟡 Early insight: ΔW ≥ variance_yellow_x × noise_w OR ≥conf_yellow_polls polls (defaults: 2×, 5 polls)
+- 🔴 Need more data: below yellow threshold
+- `variance_pct` default 2.0% — auto-updated by variance calibration run
+- `confidence(delta_w, poll_count, w_base)` — all four modules (video, llm, image_gen, rag)
 
 ## Scope Statements
 Video: "Device layer only (GoS1 server). Network, CDN, and CPE excluded."
@@ -196,13 +200,25 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] GPU PPT explanatory note in result cards (PPT vs P110 system delta)
 - [x] Home nav: Video gets own row; Image/LLM/RAG under "AI WORKLOADS" label; Queue/Settings as utility row
 
+### Session 11 — Methodology, Variance Confidence, ffmpeg Edit (2026-04-09) ✅
+- [x] `/methodology` page — full measurement methodology as standalone HTML; linked from home nav utility row
+- [x] Variance-based confidence framework — replaces fixed ΔW thresholds (5W/2W) with `noise_w = variance_pct/100 × w_base`; `confidence()` updated in all 4 modules with new `w_base` param
+- [x] New settings params: `variance_pct` (2.0%), `variance_green_x` (5×), `variance_yellow_x` (2×), `variance_runs`, `variance_cooldown_s`, `variance_cpu_cmd`, `variance_gpu_cmd`
+- [x] Settings page: Confidence section updated; new Variance calibration section with sliders + editable cmd textareas + Run button
+- [x] `/variance/run` endpoint — queues calibration job; runs N × (H264-CPU + H265-GPU) on Meridian, computes CV, writes `variance_pct` to settings.json
+- [x] `/video/preview-cmd` endpoint — returns ffmpeg command template(s) for selected preset
+- [x] Video page: ffmpeg command shown before run; editable textarea on LAN, read-only on public; custom cmd passed through to run endpoints
+- [x] `persist.py` CSV: `ffmpeg_cmd` added to video export
+- [x] `/methodology` confidence section updated to explain variance-relative approach
+- [x] CLAUDE.md/JOURNAL.md updated; SSH tunnel URL clarified (localhost:8000, not 192.168.1.62)
+
 ### Deferred
 - [ ] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` — DNS table wiped during Wix ownership transfer (Dom → Ben). Rebuild needed.
 - [ ] SSL: `sudo certbot --nginx -d wattlab.greeningofstreaming.org` — after DNS restored. Note: use `systemctl restart nginx` (not reload) after certbot edits config.
 - [ ] Image page progress bar: add elapsed time (video + LLM already have it)
 - [ ] GPU image generation: code complete, needs first clean measurement run
 - [ ] phi4 pull: `ollama pull phi4` (9.1GB) — enables 14B model in RAG compare
-- [ ] Confidence threshold refinement: working session with Tanya (current thresholds are heuristic, need statistical grounding)
+- [ ] Confidence multiplier grounding: working session with Tanya — `variance_green_x`/`variance_yellow_x` (5×/2×) currently by judgement; need statistical grounding from calibration run data
 - [ ] Transcoding profile documentation: confirm H.264/H.265/AV1 presets are apples-to-apples (same bitrate target, GOP, profile level) — work with Simon/Tanya
 - [ ] CPU temp under GPU load: investigate why CPU heats more during GPU encode than CPU encode
 

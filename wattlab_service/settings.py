@@ -8,10 +8,25 @@ DEFAULTS = {
     "video_cooldown_s": 60,
     "llm_rest_s": 10,
     "llm_unload_settle_s": 3,
-    "conf_green_delta_w": 5.0,
+    # Confidence — poll count thresholds (kept)
     "conf_green_polls": 10,
-    "conf_yellow_delta_w": 2.0,
     "conf_yellow_polls": 5,
+    # Confidence — variance-based ΔW thresholds (replace old conf_*_delta_w)
+    "variance_pct": 2.0,        # measured system variance as % of baseline power
+    "variance_green_x": 5.0,    # 🟢  ΔW must exceed this × noise_w
+    "variance_yellow_x": 2.0,   # 🟡  ΔW must exceed this × noise_w
+    # Variance calibration run parameters
+    "variance_runs": 10,         # how many H264-CPU + H265-GPU pairs to run
+    "variance_cooldown_s": 60,   # seconds between each run pair
+    "variance_cpu_cmd": (
+        "ffmpeg -y -i {input} -c:v libx264 -crf 23"
+        " -vf scale=-2:1080 -c:a aac -b:a 128k {output}"
+    ),
+    "variance_gpu_cmd": (
+        "ffmpeg -y -vaapi_device /dev/dri/renderD128 -i {input}"
+        " -vf scale=-2:1080,format=nv12,hwupload"
+        " -c:v hevc_vaapi -qp 28 -c:a aac -b:a 128k {output}"
+    ),
     "rag_corpus_path": "/home/gos/wattlab/corpus/papers",
     "rag_chroma_path": "/home/gos/wattlab/.chroma",
 }

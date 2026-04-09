@@ -77,11 +77,12 @@ def read_sensors() -> dict:
     except:
         return {"cpu_tctl": None, "gpu_junction": None}
 
-def confidence(delta_w: float, poll_count: int) -> dict:
+def confidence(delta_w: float, poll_count: int, w_base: float) -> dict:
     s = cfg.load()
-    if delta_w > s["conf_green_delta_w"] and poll_count >= s["conf_green_polls"]:
+    noise_w = s["variance_pct"] / 100.0 * max(w_base, 1.0)
+    if delta_w > s["variance_green_x"] * noise_w and poll_count >= s["conf_green_polls"]:
         return {"flag": "🟢", "label": "Repeatable"}
-    elif delta_w >= s["conf_yellow_delta_w"] or poll_count >= s["conf_yellow_polls"]:
+    elif delta_w >= s["variance_yellow_x"] * noise_w or poll_count >= s["conf_yellow_polls"]:
         return {"flag": "🟡", "label": "Early insight"}
     else:
         return {"flag": "🔴", "label": "Need more data"}
@@ -189,7 +190,7 @@ async def _run_single_inference(model_key: str, task_key: str,
     output_tokens = inference_result["output_tokens"]
     mwh_per_token = round((delta_e_wh * 1000) / max(output_tokens, 1), 4) \
         if output_tokens else None
-    conf = confidence(delta_w, len(readings))
+    conf = confidence(delta_w, len(readings), baseline)
 
     return {
         "device": device,
@@ -409,7 +410,7 @@ async def run_llm_batch_measurement(model_key: str, task_key: str, repeats: int,
                 "delta_e_wh": delta_e_wh,
                 "mwh_per_token": mwh_per_token,
                 "poll_count": len(readings),
-                "confidence": confidence(delta_w, len(readings)),
+                "confidence": confidence(delta_w, len(readings), w_base),
             },
         })
 

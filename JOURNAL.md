@@ -7,6 +7,98 @@ Scope: device layer only (GoS1). Network, CDN, and CPE explicitly excluded.
 
 ---
 
+## Session 11 — 2026-04-09
+
+### What we did
+
+**Methodology page · Variance-based confidence · ffmpeg command preview + edit · Variance calibration tool · CLAUDE.md updates**
+
+#### /methodology page
+- New standalone page at `/methodology` with full measurement methodology documentation
+- Covers: scope, measurement principle, protocol (8 steps), energy formulas, confidence framework, hardware disclosure, test type descriptions, known limitations, open questions
+- Linked from home nav utility row (alongside Queue and Settings)
+- Static HTML embedded in `main.py` as `_METHODOLOGY_HTML` string constant (no f-string — avoids CSS brace escaping)
+- HTML written externally on MacBook, transferred via `scp -P 2222` and embedded
+
+#### Variance-based confidence framework (major change)
+**Old:** Fixed absolute ΔW thresholds — 🟢 >5W, 🟡 ≥2W. Problem: does not reflect actual measurement system noise; arbitrary and not grounded in empirical data.
+
+**New:** Variance-relative thresholds anchored to empirically measured system noise.
+- `noise_w = (variance_pct / 100) × w_base` — noise in watts, computed at measurement time from baseline power
+- 🟢 ΔW > `variance_green_x × noise_w` AND polls ≥ `conf_green_polls`
+- 🟡 ΔW ≥ `variance_yellow_x × noise_w` OR polls ≥ `conf_yellow_polls`
+- 🔴 below yellow threshold
+- Defaults: `variance_pct=2.0%`, `variance_green_x=5.0×`, `variance_yellow_x=2.0×`
+- At 55W idle: noise_w ≈ 1.1W, green threshold ≈ 5.5W, yellow ≈ 2.2W — similar to old values but now scale correctly with idle power and adapt as variance is calibrated
+- Variance captures total system noise: P110 quantisation + OS background processes + Wi-Fi polling jitter + thermal drift combined
+- `confidence()` function updated in all four modules: `video.py`, `llm.py`, `image_gen.py`, `rag.py` — new signature: `confidence(delta_w, poll_count, w_base)`
+- Old settings keys `conf_green_delta_w` and `conf_yellow_delta_w` removed from `settings.py`
+
+#### New settings keys (settings.py + settings page)
+Added to `DEFAULTS` and Settings page Confidence section:
+- `variance_pct` — measured system variance as % of baseline; auto-updated by calibration
+- `variance_green_x`, `variance_yellow_x` — multiplier thresholds (default 5×, 2×)
+
+New Settings page section **Variance calibration** with:
+- `variance_runs` slider (5–100, step 5) — number of H264-CPU + H265-GPU run pairs
+- `variance_cooldown_s` slider (10–300, step 10) — cooldown between each pair
+- `variance_cpu_cmd` textarea — editable ffmpeg command template (H.264 CPU, `{input}`/`{output}` substituted at runtime)
+- `variance_gpu_cmd` textarea — editable ffmpeg command template (H.265 GPU)
+- **▶ Run variance calibration** button (LAN only) — queues the calibration job
+- Settings page gains `slider_field()` and `textarea_field()` helpers alongside existing `field()`
+
+#### Variance calibration job (`/variance/run`)
+- POST endpoint, LAN-only (403 on public)
+- Queues a job labelled "Variance calibration — system offline"
+- `run_variance_calibration()` in `video.py`: runs N × (H264-CPU baseline→encode + cooldown + H265-GPU baseline→encode) on Meridian
+- Computes coefficient of variation: CV = σ/μ × 100 across all ΔW readings
+- Writes result back to `settings.json` as `variance_pct`
+- Stage labels visible in queue status: `run_1/N_cpu_encode`, `run_1/N_cooldown`, `run_1/N_gpu_encode`, etc.
+- Calibration running as of session end (expected ~1 hour for 10 runs × 2 encodes)
+
+#### ffmpeg command preview + edit on video page
+- Before clicking Run, the ffmpeg command that would be executed is shown below the preset selector
+- `/video/preview-cmd?preset=<key>` endpoint returns command template(s) with `{input}` and `{output}` placeholders
+- On LAN: editable `<textarea>` (single preset: one box; "both" mode: CPU and GPU boxes stacked)
+- On public: read-only `<pre>`-style code block
+- Preset selection triggers `fetchCmdPreview()` JS; initial preview loads on page load
+- Edited command sent as `custom_cmd` (single) or `custom_cmd_cpu`/`custom_cmd_gpu` (both) in form POST
+- Server substitutes `{input}`/`{output}` at run time via `apply_custom_cmd()` in `video.py`
+- `run_single()`, `run_video_measurement()`, `run_both_measurement()` all accept optional custom cmd params, threaded through `run_job()`, `/video/upload`, `/video/use-source`
+- `IS_LAN` constant injected server-side into page JS so render is request-aware
+
+#### CSV export updated
+- `persist.py` `_video_result_row()` now includes `ffmpeg_cmd` column
+- Fieldnames updated to match
+
+#### /methodology confidence section updated
+- Rewrote to explain variance-relative thresholds with formula block (`noise_w = variance_pct/100 × W_base`)
+- Added explanation of why variance-relative is better than fixed thresholds
+- Updated P110 noise floor callout to describe total system noise (not just P110 hardware)
+- Open question updated: confidence multipliers (5×/2×) acknowledged as judgement-based pending statistical grounding session with Tanya
+
+#### CLAUDE.md / SSH tunnel note
+- Added "See also: GOS1_INFRA.md" reference line after Last updated
+- Updated disk free: 221GB (April 2026)
+- Clarified SSH tunnel: access via `http://localhost:8000/` not `http://192.168.1.62:8000/` — LAN IP is unreachable from outside the home network
+
+### Technical notes
+- `confidence()` now takes `w_base` as third argument in all modules — any future module must pass this
+- `variance_pct` in settings.json is the live calibration value; change it manually or via calibration run
+- `{input}` and `{output}` placeholders are substituted by `apply_custom_cmd()` (shlex-split after substitution)
+- Calibration output files are written to `/tmp/wattlab_uploads/` and deleted after each pass
+
+### Deferred (carried forward)
+- DNS + SSL (blocked on DNS rebuild)
+- GPU image generation: first clean measurement run
+- Image page elapsed time in progress bar
+- phi4 (14B): `ollama pull phi4`
+- Transcoding profile documentation (apples-to-apples)
+- CPU temp under GPU load: investigation
+- Confidence multiplier grounding: working session with Tanya (thresholds now variance-relative but multipliers still by judgement)
+
+---
+
 ## Session 10 — 2026-04-07
 
 ### What we did

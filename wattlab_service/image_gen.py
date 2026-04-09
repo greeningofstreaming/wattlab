@@ -76,11 +76,12 @@ def read_sensors() -> dict:
     except Exception:
         return {"cpu_tctl": None, "gpu_junction": None}
 
-def confidence(delta_w: float, poll_count: int) -> dict:
+def confidence(delta_w: float, poll_count: int, w_base: float) -> dict:
     s = cfg.load()
-    if delta_w > s["conf_green_delta_w"] and poll_count >= s["conf_green_polls"]:
+    noise_w = s["variance_pct"] / 100.0 * max(w_base, 1.0)
+    if delta_w > s["variance_green_x"] * noise_w and poll_count >= s["conf_green_polls"]:
         return {"flag": "🟢", "label": "Repeatable"}
-    elif delta_w >= s["conf_yellow_delta_w"] or poll_count >= s["conf_yellow_polls"]:
+    elif delta_w >= s["variance_yellow_x"] * noise_w or poll_count >= s["conf_yellow_polls"]:
         return {"flag": "🟡", "label": "Early insight"}
     else:
         return {"flag": "🔴", "label": "Need more data"}
@@ -155,7 +156,7 @@ def _calc_energy(w_base: float, w_task: float, delta_t: float,
     delta_w = round(w_task - w_base, 2)
     delta_e_wh = round(delta_w * (delta_t / 3600), 4)
     wh_per_image = round(delta_e_wh / batch, 4)
-    conf = confidence(delta_w, poll_count)
+    conf = confidence(delta_w, poll_count, w_base)
     return {
         "w_base": round(w_base, 2),
         "w_task": round(w_task, 2),

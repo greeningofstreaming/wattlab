@@ -260,11 +260,12 @@ def unload_model(model_key: str):
         pass
 
 
-def confidence(delta_w: float, poll_count: int) -> dict:
+def confidence(delta_w: float, poll_count: int, w_base: float) -> dict:
     s = cfg.load()
-    if delta_w > s["conf_green_delta_w"] and poll_count >= s["conf_green_polls"]:
+    noise_w = s["variance_pct"] / 100.0 * max(w_base, 1.0)
+    if delta_w > s["variance_green_x"] * noise_w and poll_count >= s["conf_green_polls"]:
         return {"flag": "🟢", "label": "Repeatable"}
-    elif delta_w >= s["conf_yellow_delta_w"] or poll_count >= s["conf_yellow_polls"]:
+    elif delta_w >= s["variance_yellow_x"] * noise_w or poll_count >= s["conf_yellow_polls"]:
         return {"flag": "🟡", "label": "Early insight"}
     else:
         return {"flag": "🔴", "label": "Need more data"}
@@ -425,7 +426,7 @@ async def run_rag_measurement(model_key: str, rag_mode: str, question: str,
     delta_e_wh = round(delta_w * (duration_s / 3600), 4)
     mwh_per_token = round((delta_e_wh * 1000) / max(output_tokens, 1), 4) \
         if output_tokens else None
-    conf = confidence(delta_w, len(readings))
+    conf = confidence(delta_w, len(readings), w_base)
 
     if jobs and job_id:
         jobs[job_id]["stage"] = "done"
