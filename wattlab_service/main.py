@@ -632,23 +632,31 @@ async def video_page(request: Request):
     const _SINGLE = ['Baseline', 'Encode', 'Done'];
     const _SINGLE_MAP = {{'starting':0, 'baseline':0, 'cpu_encode':1, 'gpu_encode':1,
                           'h265_cpu_encode':1, 'h265_gpu_encode':1, 'av1_cpu_encode':1, 'done':2}};
+    const _BOTH_STAGES = ['Baseline', 'CPU encode', 'Rest', 'Baseline 2', 'GPU encode', 'Done'];
+    const _BOTH_MAP = {{'starting':0, 'baseline':0, 'cpu_encode':1, 'rest':2,
+                        'baseline_2':3, 'gpu_encode':4, 'done':5}};
     const STAGES = {{
-        cpu:      _SINGLE,
-        gpu:      _SINGLE,
-        h265_cpu: _SINGLE,
-        h265_gpu: _SINGLE,
-        av1_cpu:  _SINGLE,
-        both: ['Baseline', 'CPU encode', 'Rest', 'Baseline 2', 'GPU encode', 'Done'],
+        cpu:       _SINGLE,
+        gpu:       _SINGLE,
+        h265_cpu:  _SINGLE,
+        h265_gpu:  _SINGLE,
+        av1_cpu:   _SINGLE,
+        av1_gpu:   _SINGLE,
+        both:      _BOTH_STAGES,
+        h265_both: _BOTH_STAGES,
+        av1_both:  _BOTH_STAGES,
     }};
 
     const STAGE_MAP = {{
-        cpu:      _SINGLE_MAP,
-        gpu:      _SINGLE_MAP,
-        h265_cpu: _SINGLE_MAP,
-        h265_gpu: _SINGLE_MAP,
-        av1_cpu:  _SINGLE_MAP,
-        both: {{'starting':0, 'baseline':0, 'cpu_encode':1, 'rest':2,
-                'baseline_2':3, 'gpu_encode':4, 'done':5}},
+        cpu:       _SINGLE_MAP,
+        gpu:       _SINGLE_MAP,
+        h265_cpu:  _SINGLE_MAP,
+        h265_gpu:  _SINGLE_MAP,
+        av1_cpu:   _SINGLE_MAP,
+        av1_gpu:   _SINGLE_MAP,
+        both:      _BOTH_MAP,
+        h265_both: _BOTH_MAP,
+        av1_both:  _BOTH_MAP,
     }};
 
     function selectPreset(key) {{
@@ -908,18 +916,21 @@ async def video_page(request: Request):
         }}
         const rows = runs.map(r => {{
             const date = r.saved_at ? r.saved_at.slice(0,16).replace('T',' ') : '—';
-            let summary;
+            let summary, codec;
             if (r.mode === 'both') {{
+                codec = [r.cpu_preset, r.gpu_preset].filter(Boolean).join(' vs ');
                 summary = `CPU ${{r.cpu_delta_e_wh}} Wh ${{r.cpu_confidence||''}} · GPU ${{r.gpu_delta_e_wh}} Wh ${{r.gpu_confidence||''}}`;
             }} else {{
-                summary = `${{r.preset||''}} · ${{r.delta_e_wh}} Wh ${{r.confidence||''}}`;
+                codec = r.preset || '';
+                summary = `${{r.delta_e_wh}} Wh ${{r.confidence||''}}`;
             }}
             const base = '/results/video/' + r.job_id;
             return `<div style="border-bottom:1px solid #111;padding:0.6rem 0">
                 <div style="display:flex;justify-content:space-between;align-items:baseline">
-                    <span style="color:#e0e0e0;font-size:0.82rem">${{date}} · ${{r.mode}}</span>
+                    <span style="color:#e0e0e0;font-size:0.82rem">${{date}}</span>
                     <span style="color:#555;font-size:0.75rem;font-family:monospace">${{r.job_id}}</span>
                 </div>
+                <div style="color:#888;font-size:0.75rem;margin:0.1rem 0">${{codec}}</div>
                 <div style="color:#00ff99;font-size:0.8rem;margin:0.2rem 0">${{summary}}</div>
                 <div style="display:flex;gap:0.5rem;margin-top:0.3rem">
                     <a href="${{base}}/download.json" download

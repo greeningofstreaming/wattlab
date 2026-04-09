@@ -110,8 +110,12 @@ def _summarise(job_type: str, data: dict) -> dict:
         mode = data.get("mode", "?")
         summary["mode"] = mode
         if mode == "both":
-            cpu_e = data.get("cpu", {}).get("energy", {})
-            gpu_e = data.get("gpu", {}).get("energy", {})
+            cpu_r = data.get("cpu", {})
+            gpu_r = data.get("gpu", {})
+            cpu_e = cpu_r.get("energy", {})
+            gpu_e = gpu_r.get("energy", {})
+            summary["cpu_preset"] = cpu_r.get("preset_label")
+            summary["gpu_preset"] = gpu_r.get("preset_label")
             summary["cpu_delta_e_wh"] = cpu_e.get("delta_e_wh")
             summary["gpu_delta_e_wh"] = gpu_e.get("delta_e_wh")
             summary["cpu_duration_s"] = cpu_e.get("delta_t_s")
