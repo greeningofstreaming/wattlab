@@ -152,7 +152,21 @@ _LOGO = (
     f'greeningofstreaming.org</span></a>'
 )
 _BACK = '<a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Home</a>'
-_FOOTER = f'<footer style="margin-top:3rem;padding-top:1rem;border-top:1px solid #111">{_LOGO}</footer>'
+_QUEUE_BADGE = (
+    '<div id="gos-qbadge" style="position:fixed;bottom:1rem;right:1rem;'
+    'font-family:monospace;font-size:0.72rem;background:#111;border:1px solid #1a1a1a;'
+    'padding:0.3rem 0.6rem;display:none">'
+    '<a href="/queue-status" style="color:#555;text-decoration:none">'
+    '&#x23F1;&nbsp;<span id="gos-qd"></span></a></div>'
+    '<script>(function(){async function qp(){'
+    'try{var d=await(await fetch("/queue")).json();'
+    'var el=document.getElementById("gos-qbadge");if(!el)return;'
+    'if(d.depth>0){el.style.display="block";'
+    'document.getElementById("gos-qd").textContent=d.depth+(d.depth===1?" job":" jobs");}'
+    'else el.style.display="none";}catch(e){}'
+    'setTimeout(qp,10000);}qp();})();' + '</script>'
+)
+_FOOTER = f'<footer style="margin-top:3rem;padding-top:1rem;border-top:1px solid #111">{_LOGO}</footer>' + _QUEUE_BADGE
 
 # Confidence flag popover — inject into any page that shows .conf-badge elements.
 # Plain string (not f-string) so JS curly braces need no escaping.
@@ -2636,7 +2650,7 @@ async def settings_page(request: Request):
       variation: idle (raw P110 baseline readings), CPU (ΔW per H264 run), GPU (ΔW per H265 run).
       Their mean is written to Variance % above. Queue is blocked for the duration.
     </div>
-    {slider_field("variance_runs",      s['variance_runs'],      5,  100, 5,  "runs",    "number of H264-CPU + H265-GPU run pairs")}
+    {slider_field("variance_runs",      s['variance_runs'],      2,  100, 1,  "runs",    "number of H264-CPU + H265-GPU run pairs")}
     {slider_field("variance_cooldown_s",s['variance_cooldown_s'],10, 300, 10, "s",       "cooldown between each run pair")}
     {textarea_field("variance_cpu_cmd", s['variance_cpu_cmd'], "H.264 CPU command — {input} and {output} are substituted at runtime")}
     {textarea_field("variance_gpu_cmd", s['variance_gpu_cmd'], "H.265 GPU command — {input} and {output} are substituted at runtime")}
@@ -2828,7 +2842,9 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     <span class="dot" id="dot-3"></span>
     <span class="dot" id="dot-4"></span>
     <span class="dot" id="dot-5"></span>
+    <span class="dot" id="dot-6"></span>
     <span class="label active" id="nav-label">Welcome</span>
+    <span id="step-counter" style="color:#333;font-size:0.7rem;margin-left:0.25rem">1 / 7</span>
   </div>
 </div>
 
@@ -2914,6 +2930,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div id="next-1" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
     <div class="btn-row">
+      <button class="btn btn-secondary" onclick="goStep(0)">← Welcome</button>
       <button class="btn btn-primary" onclick="goStep(2)">Next: LLM inference →</button>
       <button class="btn btn-secondary" onclick="resetVideoStep()">Run again</button>
     </div>
@@ -2968,6 +2985,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div id="next-2" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
     <div class="btn-row">
+      <button class="btn btn-secondary" onclick="goStep(1)">← Video</button>
       <button class="btn btn-primary" onclick="goStep(3)">Next: Image generation →</button>
       <button class="btn btn-secondary" onclick="resetLLMStep()">Run again</button>
     </div>
@@ -3013,78 +3031,123 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div id="next-3" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
     <div class="btn-row">
-      <button class="btn btn-primary" onclick="goStep(4)">Next: How we flag confidence →</button>
+      <button class="btn btn-secondary" onclick="goStep(2)">← LLM</button>
+      <button class="btn btn-primary" onclick="goStep(4)">Next: RAG →</button>
       <button class="btn btn-secondary" onclick="resetImageStep()">Run again</button>
     </div>
   </div>
 </div>
 
-<!-- Step 4: Confidence -->
+<!-- Step 4: RAG -->
 <div class="step" id="step-4">
+  <h1>RAG Energy Cost</h1>
+
+  <div class="band">
+    <div class="band-label">What this shows</div>
+    <p style="color:#aaa;line-height:1.8;max-width:560px">
+      Whether retrieval-augmented generation (RAG) — searching a local corpus
+      before answering — costs meaningfully more energy than plain inference.
+    </p>
+  </div>
+
+  <div class="band">
+    <div class="band-label">What we're doing</div>
+    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
+      Running three modes back-to-back on Mistral 7B: baseline (no retrieval),
+      RAG (small corpus), and RAG Large (with re-ranking).
+      Same question, same model, same hardware — only the retrieval pipeline changes.
+    </p>
+    <details>
+      <summary>How this is measured</summary>
+      <p>Each mode: 10s idle baseline, inference with P110 at 1s intervals.
+      Metric: mWh per output token. ChromaDB embeddings via sentence-transformers.
+      Corpus: academic papers on streaming energy.</p>
+    </details>
+  </div>
+
+  <div>
+    <div class="band-label">Result</div>
+    <div id="rag-btns" class="btn-row" style="display:none">
+      <button class="btn btn-primary" onclick="runDemoRAG()">Run 3-mode comparison (~10 min)</button>
+    </div>
+    <div id="rag-status"></div>
+    <p class="limitation">Scope: device layer only (GoS1). Network excluded.
+    RAG retrieval adds overhead but the dominant cost remains token generation.</p>
+  </div>
+
+  <div id="next-4" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="goStep(3)">← Image</button>
+      <button class="btn btn-primary" onclick="goStep(5)">Next: How we flag confidence →</button>
+      <button class="btn btn-secondary" onclick="resetRAGStep()">Run again</button>
+    </div>
+  </div>
+</div>
+
+<!-- Step 5: Confidence -->
+<div class="step" id="step-5">
   <h1>How We Flag Confidence</h1>
 
   <div class="band">
     <div class="band-label">The problem</div>
     <p style="color:#aaa;line-height:1.8;max-width:560px">
       Not every measurement we take is equally trustworthy.
-      The Tapo P110 has a practical noise floor of around 1W at steady state.
-      A task that adds 1.5W above baseline might be real signal — or it might
-      be measurement noise from the plug itself.
+      System noise — P110 quantisation, OS jitter, Wi-Fi polling variance — is real.
+      A task that adds a small delta above baseline might be signal or artefact.
+      We need a principled way to say which.
     </p>
   </div>
 
   <div class="band">
     <div class="band-label">The system</div>
     <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:1rem">
-      Every result carries a traffic light based on two measurements:
-      the power delta above idle (ΔW) and the number of 1-second polls
-      taken during the task.
+      Every result carries a traffic light. Thresholds are <em>variance-relative</em>:
+      anchored to empirically measured system noise, not fixed watt values.
+      <code style="font-family:monospace;font-size:0.82rem;color:#888">noise = (variance% / 100) × W_base</code>
     </p>
     <div style="display:flex;flex-direction:column;gap:0.75rem;max-width:480px">
       <div style="border-left:2px solid #1a3a1a;padding:0.6rem 1rem">
         <div style="font-family:monospace;font-size:0.9rem">🟢 Repeatable</div>
         <div style="color:#555;font-size:0.82rem;margin-top:0.25rem">
-          ΔW > 5W and ≥ 10 polls. Well above noise floor. Reliable enough to cite.</div>
+          ΔW &gt; 5× noise <em>and</em> ≥ 10 polls. Well above noise floor. Reliable enough to cite.</div>
       </div>
       <div style="border-left:2px solid #3a3a00;padding:0.6rem 1rem">
         <div style="font-family:monospace;font-size:0.9rem">🟡 Early insight</div>
         <div style="color:#555;font-size:0.82rem;margin-top:0.25rem">
-          ΔW ≥ 2W or ≥ 5 polls. Directional and consistent with expectation,
-          but needs more runs before we'd stake a public claim on it.</div>
+          ΔW ≥ 2× noise <em>or</em> ≥ 5 polls. Directional signal, but needs more runs
+          before we'd stake a public claim on it.</div>
       </div>
       <div style="border-left:2px solid #2a0000;padding:0.6rem 1rem">
         <div style="font-family:monospace;font-size:0.9rem">🔴 Need more data</div>
         <div style="color:#555;font-size:0.82rem;margin-top:0.25rem">
-          ΔW &lt; 2W. Near the noise floor. Could be measurement artefact.
+          Below yellow threshold. Could be measurement artefact.
           We publish it anyway — but we won't cite it yet.</div>
       </div>
     </div>
   </div>
 
   <div class="band">
-    <div class="band-label">Why these thresholds?</div>
+    <div class="band-label">Why variance-relative?</div>
     <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
-      Five watts of delta gives a ~5:1 signal-to-noise ratio against the P110
-      noise floor — enough to be confident the task is the cause, not variance.
-      Ten polls means ten seconds of measurement. Short tasks like TinyLlama
-      inference (1–4s total) often land in yellow or red. That's not a failure
-      — it tells us to run the task in batch mode to accumulate measurement time.
+      Fixed thresholds (e.g. "5W = green") don't adapt to the machine's actual noise
+      level. Our calibration run measures idle variance, CPU encode variance, and GPU
+      encode variance separately — then sets the noise floor from real data.
+      At 55W idle with 2% variance: noise ≈ 1.1W, green threshold ≈ 5.5W.
+      As the system is calibrated further, these thresholds tighten automatically.
     </p>
     <p style="color:#555;line-height:1.7;max-width:560px">
-      The thresholds are configurable in lab Settings and applied consistently
-      across video, LLM, and image generation results.
-      On any result page, click a 🟢 🟡 🔴 badge for a quick reminder.
+      On any result page, click a 🟢 🟡 🔴 badge for a quick reminder of the formula.
     </p>
   </div>
 
   <div class="btn-row" style="margin-top:0.5rem">
-    <button class="btn btn-primary" onclick="goStep(5)">See findings →</button>
-    <button class="btn btn-secondary" onclick="goStep(1)">← Start over</button>
+    <button class="btn btn-secondary" onclick="goStep(4)">← RAG</button>
+    <button class="btn btn-primary" onclick="goStep(6)">See findings →</button>
   </div>
 </div>
 
-<!-- Step 5: Findings -->
-<div class="step" id="step-5">
+<!-- Step 6: Findings -->
+<div class="step" id="step-6">
   <h1>Findings</h1>
   <p style="color:#555;font-size:0.85rem;margin-bottom:1.5rem">
     Greening of Streaming · WattLab · GoS1</p>
@@ -3095,7 +3158,8 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <hr class="divider">
   <div class="btn-row">
-    <button class="btn btn-secondary" onclick="goStep(1)">← Start over</button>
+    <button class="btn btn-secondary" onclick="goStep(5)">← Confidence</button>
+    <button class="btn btn-secondary" onclick="goStep(1)">↺ Start over</button>
     <a href="https://greeningofstreaming.org" target="_blank"
        class="btn btn-secondary" style="text-decoration:none;display:inline-block;line-height:1">
       greeningofstreaming.org ↗</a>
@@ -3111,7 +3175,8 @@ let currentStep = 0;
 let videoResult = null;
 let llmResult = null;
 let imageResult = null;
-const stepLabels = ['Welcome', 'Video Transcode', 'LLM Inference', 'Image Generation', 'Confidence', 'Findings'];
+let ragResult = null;
+const stepLabels = ['Welcome', 'Video Transcode', 'LLM Inference', 'Image Generation', 'RAG', 'Confidence', 'Findings'];
 let streamTimer = null;
 let imageTimer = null;
 
@@ -3119,22 +3184,25 @@ let imageTimer = null;
 function goStep(n) {{
   document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
   document.getElementById('step-' + n).classList.add('active');
-  for (let i = 0; i < 6; i++) {{
+  for (let i = 0; i < 7; i++) {{
     const dot = document.getElementById('dot-' + i);
     dot.className = 'dot' + (i < n ? ' done' : i === n ? ' active' : '');
   }}
   const lbl = document.getElementById('nav-label');
   lbl.textContent = stepLabels[n];
   lbl.className = 'label active';
+  document.getElementById('step-counter').textContent = (n + 1) + ' / 7';
   currentStep = n;
   window.scrollTo(0, 0);
   if (n === 1 && !videoResult) loadVideoStep();
   if (n === 2 && !llmResult) loadLLMStep();
   if (n === 3 && !imageResult) loadImageStep();
+  if (n === 4 && !ragResult) loadRAGStep();
   if (n === 1 && videoResult) revealNext(1);
   if (n === 2 && llmResult) revealNext(2);
   if (n === 3 && imageResult) revealNext(3);
-  if (n === 5) buildSummary();
+  if (n === 4 && ragResult) revealNext(4);
+  if (n === 6) buildSummary();
 }}
 
 function revealNext(n) {{
@@ -3153,6 +3221,10 @@ function loadLLMStep() {{
 function loadImageStep() {{
   document.getElementById('image-status').innerHTML = '<p class="progress-note" style="color:#555">Loading last result…</p>';
   showPrevImage();
+}}
+function loadRAGStep() {{
+  document.getElementById('rag-status').innerHTML = '<p class="progress-note" style="color:#555">Loading last result…</p>';
+  showPrevRAG();
 }}
 
 // ─── Live power ───────────────────────────────────────────────────────────────
@@ -3466,6 +3538,100 @@ function resetImageStep() {{
   document.getElementById('image-status').innerHTML = '';
   document.getElementById('next-3').style.display = 'none';
 }}
+function resetRAGStep() {{
+  ragResult = null;
+  document.getElementById('rag-btns').style.display = 'flex';
+  document.getElementById('rag-status').innerHTML = '';
+  document.getElementById('next-4').style.display = 'none';
+}}
+
+// ─── RAG ─────────────────────────────────────────────────────────────────────
+async function showPrevRAG() {{
+  document.getElementById('rag-btns').style.display = 'none';
+  try {{
+    const resp = await fetch('/results/llm/list');
+    const list = await resp.json();
+    const ragRuns = (list || []).filter(r => r.task === 'RAG compare (3 modes)');
+    if (!ragRuns.length) {{
+      document.getElementById('rag-status').innerHTML = '';
+      document.getElementById('rag-btns').style.display = 'flex';
+      return;
+    }}
+    const r2 = await fetch('/results/llm/' + ragRuns[0].job_id + '/download.json');
+    const full = await r2.json();
+    ragResult = full;
+    renderRAGResult(full, ragRuns[0].saved_at, true);
+  }} catch(e) {{
+    document.getElementById('rag-btns').style.display = 'flex';
+  }}
+}}
+
+async function runDemoRAG() {{
+  document.getElementById('rag-btns').style.display = 'none';
+  document.getElementById('rag-status').innerHTML = '<p class="progress-note">▶ Starting RAG comparison…</p>';
+  try {{
+    const form = new FormData();
+    form.append('model_key', 'mistral');
+    form.append('question', 'How does codec choice affect streaming energy consumption?');
+    const resp = await fetch('/rag/run-compare', {{method:'POST', body:form}});
+    const data = await resp.json();
+    if (data.job_id) pollDemoRAG(data.job_id, Date.now());
+    else document.getElementById('rag-status').innerHTML =
+      '<p class="progress-note" style="color:#ff4400">' + JSON.stringify(data) + '</p>';
+  }} catch(e) {{
+    document.getElementById('rag-status').innerHTML =
+      '<p class="progress-note" style="color:#ff4400">Error: ' + e + '</p>';
+    document.getElementById('rag-btns').style.display = 'flex';
+  }}
+}}
+
+function pollDemoRAG(jobId, t0) {{
+  const elapsed = Math.floor((Date.now()-t0)/1000);
+  const m = Math.floor(elapsed/60), s = elapsed%60;
+  const eStr = m > 0 ? m+'m '+s+'s' : s+'s';
+  fetch('/rag/job/' + jobId).then(r=>r.json()).then(data => {{
+    if (data.stage === 'done' && data.result) {{
+      ragResult = data.result;
+      renderRAGResult(data.result, new Date().toISOString(), false);
+    }} else if (data.error) {{
+      document.getElementById('rag-status').innerHTML =
+        '<p class="progress-note" style="color:#ff4400">Error: ' + data.error + '</p>';
+      document.getElementById('rag-btns').style.display = 'flex';
+    }} else {{
+      const stage = data.stage || '';
+      const lbl = stage.startsWith('baseline') ? 'Measuring baseline…' :
+                  stage.startsWith('inference') ? 'Running ' + stage + '…' : stage || '…';
+      document.getElementById('rag-status').innerHTML =
+        '<p class="progress-note">▶ ' + lbl + '</p>' +
+        '<p class="dim mono" style="font-size:0.78rem;margin-top:0.4rem">Elapsed: ' + eStr + '</p>';
+      setTimeout(() => pollDemoRAG(jobId, t0), 3000);
+    }}
+  }}).catch(() => setTimeout(() => pollDemoRAG(jobId, t0), 5000));
+}}
+
+function renderRAGResult(r, savedAt, isPrev) {{
+  const prevNote = isPrev ? '<p class="prev-note">↩ Previous run · ' + timeAgo(savedAt) + '</p>' : '';
+  const modes = ['baseline', 'rag', 'rag_large'];
+  const labels = {{'baseline': 'Baseline', 'rag': 'RAG', 'rag_large': 'RAG Large'}};
+  const results = r.results || {{}};
+  let kpis = '';
+  modes.forEach(m => {{
+    const res = results[m];
+    if (!res) return;
+    const e = res.energy || {{}}, inf = res.inference || {{}};
+    kpis += `<div class="kpi">
+      <div class="val">${{fmt(e.mwh_per_token, 3)}}</div>
+      <div class="lbl">${{labels[m]}} mWh/tok</div>
+      <div style="font-size:0.72rem;color:#444;margin-top:0.15rem">
+        ${{fmt(inf.tokens_per_sec,1)}} tok/s · ${{e.confidence ? e.confidence.flag : ''}}</div>
+    </div>`;
+  }});
+  document.getElementById('rag-status').innerHTML = prevNote +
+    `<div class="result-card"><div class="kpi-row">${{kpis}}</div>
+     <p class="scope-note">Device layer only. Retrieval overhead is real but modest.</p></div>`;
+  document.getElementById('rag-btns').style.display = 'none';
+  revealNext(4);
+}}
 
 // ─── Image ────────────────────────────────────────────────────────────────────
 async function runDemoImage() {{
@@ -3664,6 +3830,23 @@ function buildSummary() {{
       rows += `<tr><td>Image</td><td style="color:#333">—</td></tr>`;
     }}
   }} catch(err) {{ rows += `<tr><td>Image</td><td style="color:#555">error: ${{err.message}}</td></tr>`; }}
+
+  // RAG
+  try {{
+    if (ragResult && ragResult.results) {{
+      const bl = ragResult.results.baseline, rl = ragResult.results.rag_large;
+      if (bl && rl) {{
+        const overhead = bl.energy && rl.energy && bl.energy.mwh_per_token > 0
+          ? (((rl.energy.mwh_per_token - bl.energy.mwh_per_token) / bl.energy.mwh_per_token) * 100).toFixed(1)
+          : null;
+        rows += `<tr><td>RAG · Baseline mWh/tok</td><td>${{fmt(bl.energy && bl.energy.mwh_per_token,3)}}</td></tr>`;
+        rows += `<tr><td>RAG Large mWh/tok</td><td>${{fmt(rl.energy && rl.energy.mwh_per_token,3)}}</td></tr>`;
+        if (overhead !== null) rows += `<tr><td>RAG overhead</td><td>${{overhead}}%</td></tr>`;
+      }}
+    }} else {{
+      rows += `<tr><td>RAG</td><td style="color:#333">—</td></tr>`;
+    }}
+  }} catch(err) {{ rows += `<tr><td>RAG</td><td style="color:#555">error: ${{err.message}}</td></tr>`; }}
 
   }} catch(outerErr) {{
     el.innerHTML = '<p style="color:#ff4400;font-family:monospace;font-size:0.82rem">Summary error: ' + outerErr + '</p>';
