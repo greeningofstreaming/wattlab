@@ -451,9 +451,12 @@ async def run_variance_calibration(job_id: str, jobs: dict) -> dict:
         for i in range(n_runs):
             run_label = f"{i + 1}/{n_runs}"
 
+            def _stage(s):
+                if jobs:
+                    jobs[job_id]["stage"] = f"run {run_label} — {s}"
+
             # --- CPU baseline (collect raw readings for idle CV) ---
-            if jobs:
-                jobs[job_id]["stage"] = f"run_{run_label}_cpu_baseline"
+            _stage("CPU baseline")
             raw_cpu_base = []
             for _ in range(n_base):
                 w = await get_power_watts()
@@ -465,8 +468,7 @@ async def run_variance_calibration(job_id: str, jobs: dict) -> dict:
             # --- CPU encode ---
             out_cpu = UPLOAD_DIR / f"{job_id}_var_cpu_{i}.mp4"
             cmd_cpu = apply_custom_cmd(cpu_tpl, meridian, out_cpu)
-            if jobs:
-                jobs[job_id]["stage"] = f"run_{run_label}_cpu_encode"
+            _stage("H.264 CPU encode")
             stop_cpu = asyncio.Event()
             poll_cpu = asyncio.create_task(poll_during_task(stop_cpu))
             await asyncio.get_event_loop().run_in_executor(None, transcode, cmd_cpu)
@@ -478,13 +480,11 @@ async def run_variance_calibration(job_id: str, jobs: dict) -> dict:
                 cpu_delta_w.append(round(w_task - w_base_cpu, 3))
 
             # --- Cooldown between CPU and GPU ---
-            if jobs:
-                jobs[job_id]["stage"] = f"run_{run_label}_cooldown"
+            _stage("cooldown")
             await asyncio.sleep(cooldown)
 
             # --- GPU baseline (collect raw readings for idle CV) ---
-            if jobs:
-                jobs[job_id]["stage"] = f"run_{run_label}_gpu_baseline"
+            _stage("GPU baseline")
             raw_gpu_base = []
             for _ in range(n_base):
                 w = await get_power_watts()
@@ -496,8 +496,7 @@ async def run_variance_calibration(job_id: str, jobs: dict) -> dict:
             # --- GPU encode ---
             out_gpu = UPLOAD_DIR / f"{job_id}_var_gpu_{i}.mp4"
             cmd_gpu = apply_custom_cmd(gpu_tpl, meridian, out_gpu)
-            if jobs:
-                jobs[job_id]["stage"] = f"run_{run_label}_gpu_encode"
+            _stage("H.265 GPU encode")
             stop_gpu = asyncio.Event()
             poll_gpu = asyncio.create_task(poll_during_task(stop_gpu))
             await asyncio.get_event_loop().run_in_executor(None, transcode, cmd_gpu)
@@ -510,8 +509,7 @@ async def run_variance_calibration(job_id: str, jobs: dict) -> dict:
 
             # --- Inter-run cooldown (skip after last run) ---
             if i < n_runs - 1:
-                if jobs:
-                    jobs[job_id]["stage"] = f"run_{run_label}_inter_cooldown"
+                _stage("inter-run cooldown")
                 await asyncio.sleep(cooldown)
 
     finally:

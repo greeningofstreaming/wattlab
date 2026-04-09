@@ -4068,7 +4068,7 @@ async def queue_page():
     <div id="content"><p class="empty">Loading…</p></div>
 <script>
 function resumeLink(type, jobId) {
-    if (!type || !jobId) return '';
+    if (!type || !jobId || type === 'variance') return '';
     return ' <a href="/' + type + '?job=' + jobId + '" style="color:#00ff99;font-size:0.75rem;' +
            'text-decoration:none;margin-left:0.75rem">↩ Resume</a>';
 }
