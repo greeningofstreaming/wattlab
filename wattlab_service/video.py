@@ -68,7 +68,7 @@ PRESETS = {
             "-extra_hw_frames", "32",
             "-vaapi_device", "/dev/dri/renderD128",
             "-i", str(i),
-            "-vf", "scale_vaapi=-2:1080",
+            "-vf", "scale_vaapi=w=-2:h=1080:format=nv12",
             "-c:v", "h264_vaapi", "-qp", "23",
             "-c:a", "aac", "-b:a", "128k",
             str(o)
@@ -94,7 +94,7 @@ PRESETS = {
             "-extra_hw_frames", "32",
             "-vaapi_device", "/dev/dri/renderD128",
             "-i", str(i),
-            "-vf", "scale_vaapi=-2:1080",
+            "-vf", "scale_vaapi=w=-2:h=1080:format=nv12",
             "-c:v", "hevc_vaapi", "-qp", "28",
             "-c:a", "aac", "-b:a", "128k",
             str(o)
@@ -120,7 +120,7 @@ PRESETS = {
             "-extra_hw_frames", "32",
             "-vaapi_device", "/dev/dri/renderD128",
             "-i", str(i),
-            "-vf", "scale_vaapi=-2:1080",
+            "-vf", "scale_vaapi=w=-2:h=1080:format=nv12",
             "-c:v", "av1_vaapi", "-qp", "28",
             "-c:a", "aac", "-b:a", "128k",
             str(o)
@@ -271,7 +271,7 @@ async def run_single(input_path: Path, job_id: str, preset_key: str,
     gpu_ppts = [r["gpu_ppt_w"] for r in readings if r.get("gpu_ppt_w")]
 
     out_size_mb = round(output_path.stat().st_size / 1024 / 1024, 2) \
-        if transcode_result["success"] and output_path.exists() else None
+        if output_path.exists() and output_path.stat().st_size > 0 else None
 
     return {
         "preset_key": preset_key,

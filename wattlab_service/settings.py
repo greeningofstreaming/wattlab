@@ -30,7 +30,7 @@ DEFAULTS = {
         "ffmpeg -y -hwaccel vaapi -hwaccel_output_format vaapi"
         " -extra_hw_frames 32"
         " -vaapi_device /dev/dri/renderD128 -i {input}"
-        " -vf scale_vaapi=-2:1080"
+        " -vf scale_vaapi=w=-2:h=1080:format=nv12"
         " -c:v hevc_vaapi -qp 28 -c:a aac -b:a 128k {output}"
     ),
     "rag_corpus_path": "/home/gos/wattlab/corpus/papers",
