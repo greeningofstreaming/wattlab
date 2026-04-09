@@ -378,6 +378,12 @@ async def video_page(request: Request):
         .preset .badge {{ display: inline-block; background: #00ff9922;
                           color: #00ff99; font-size: 0.7rem;
                           padding: 0.1rem 0.4rem; margin-bottom: 0.4rem; }}
+        .pdesc {{ margin-top: 0.4rem; }}
+        .pdesc summary {{ color: #444; font-size: 0.7rem; cursor: pointer; list-style: none; }}
+        .pdesc summary::-webkit-details-marker {{ display: none; }}
+        .pdesc summary::before {{ content: '▸ '; }}
+        details[open].pdesc summary::before {{ content: '▾ '; }}
+        .pdesc[open] {{ color: #555; font-size: 0.72rem; line-height: 1.5; padding-top: 0.3rem; }}
         input[type=file] {{ color: #aaa; margin-bottom: 1rem; width: 100%; }}
         button {{ background: #00ff99; color: #000; border: none;
                   padding: 0.75rem 2rem; cursor: pointer;
@@ -444,38 +450,56 @@ async def video_page(request: Request):
     <div class="presets" style="margin-bottom:0.75rem">
         <div class="preset" id="preset-cpu" onclick="selectPreset('cpu')">
             <h3>H.264 CPU</h3>
-            <p style="color:#555;font-size:0.75rem;margin-bottom:0.4rem">libx264 · CRF 23 · 1080p</p>
-            <p>Software encode across all 24 cores.</p>
+            <p class="pspec">libx264 · CRF 23 · 1080p</p>
+            <details class="pdesc"><summary>details</summary>Software encode across all 24 cores.</details>
         </div>
         <div class="preset" id="preset-gpu" onclick="selectPreset('gpu')">
             <h3>H.264 GPU</h3>
-            <p style="color:#555;font-size:0.75rem;margin-bottom:0.4rem">h264_vaapi · QP 23 · 1080p · full pipeline</p>
-            <p>Hardware decode + encode. Full GPU pipeline — representative of live encoding.</p>
+            <p class="pspec">h264_vaapi · QP 23 · 1080p · full pipeline</p>
+            <details class="pdesc"><summary>details</summary>Hardware decode + encode. Full GPU pipeline — representative of live encoding.</details>
         </div>
         <div class="preset selected" id="preset-both" onclick="selectPreset('both')">
-            <div class="badge">DEFAULT</div>
             <h3>H.264 Both</h3>
-            <p style="color:#555;font-size:0.75rem;margin-bottom:0.4rem">CPU then GPU · same file</p>
-            <p>Side-by-side energy + thermal report with analysis.</p>
+            <p class="pspec">CPU then GPU · same file</p>
+            <details class="pdesc"><summary>details</summary>Side-by-side energy + thermal report with analysis.</details>
         </div>
     </div>
     <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
-                letter-spacing:0.05em;margin-bottom:0.5rem">H.265 / AV1</div>
-    <div class="presets" style="margin-bottom:1.5rem">
+                letter-spacing:0.05em;margin-bottom:0.5rem">H.265</div>
+    <div class="presets" style="margin-bottom:0.75rem">
         <div class="preset" id="preset-h265_cpu" onclick="selectPreset('h265_cpu')">
             <h3>H.265 CPU</h3>
-            <p style="color:#555;font-size:0.75rem;margin-bottom:0.4rem">libx265 · CRF 28 · 1080p</p>
-            <p>Software HEVC encode.</p>
+            <p class="pspec">libx265 · CRF 28 · 1080p</p>
+            <details class="pdesc"><summary>details</summary>Software HEVC encode.</details>
         </div>
         <div class="preset" id="preset-h265_gpu" onclick="selectPreset('h265_gpu')">
             <h3>H.265 GPU</h3>
-            <p style="color:#555;font-size:0.75rem;margin-bottom:0.4rem">hevc_vaapi · QP 28 · 1080p · full pipeline</p>
-            <p>Hardware decode + encode. Full GPU pipeline — representative of live encoding.</p>
+            <p class="pspec">hevc_vaapi · QP 28 · 1080p · full pipeline</p>
+            <details class="pdesc"><summary>details</summary>Hardware decode + encode. Full GPU pipeline.</details>
         </div>
+        <div class="preset" id="preset-h265_both" onclick="selectPreset('h265_both')">
+            <h3>H.265 Both</h3>
+            <p class="pspec">CPU then GPU · same file</p>
+            <details class="pdesc"><summary>details</summary>Side-by-side H.265 CPU vs GPU comparison.</details>
+        </div>
+    </div>
+    <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+                letter-spacing:0.05em;margin-bottom:0.5rem">AV1</div>
+    <div class="presets" style="margin-bottom:1.5rem">
         <div class="preset" id="preset-av1_cpu" onclick="selectPreset('av1_cpu')">
             <h3>AV1 CPU</h3>
-            <p style="color:#555;font-size:0.75rem;margin-bottom:0.4rem">libsvtav1 · CRF 30 · 1080p</p>
-            <p>SVT-AV1 software encode.</p>
+            <p class="pspec">libsvtav1 · CRF 30 · 1080p</p>
+            <details class="pdesc"><summary>details</summary>SVT-AV1 software encode.</details>
+        </div>
+        <div class="preset" id="preset-av1_gpu" onclick="selectPreset('av1_gpu')">
+            <h3>AV1 GPU</h3>
+            <p class="pspec">av1_vaapi · QP 28 · 1080p · full pipeline</p>
+            <details class="pdesc"><summary>details</summary>Hardware decode + AV1 encode. RDNA3 AV1 engine.</details>
+        </div>
+        <div class="preset" id="preset-av1_both" onclick="selectPreset('av1_both')">
+            <h3>AV1 Both</h3>
+            <p class="pspec">CPU then GPU · same file</p>
+            <details class="pdesc"><summary>details</summary>Side-by-side AV1 CPU vs GPU comparison.</details>
         </div>
     </div>
 
@@ -491,8 +515,18 @@ async def video_page(request: Request):
                        style="margin-top:0.2rem;accent-color:#00ff99">
                 <div>
                     <div style="color:#e0e0e0;font-size:0.85rem">Upload a file</div>
+                    <div style="color:#555;font-size:0.75rem">MP4, MOV, MKV, AVI, WebM, TS · Max 1GB</div>
+                </div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:0.75rem;
+                          border:1px solid #333;padding:0.75rem;cursor:pointer">
+                <input type="radio" name="source" value="meridian_120s"
+                       onchange="selectSource('meridian_120s')"
+                       style="margin-top:0.2rem;accent-color:#00ff99">
+                <div>
+                    <div style="color:#e0e0e0;font-size:0.85rem">Meridian 4K — 2 min extract</div>
                     <div style="color:#555;font-size:0.75rem">
-                        MP4, MOV, MKV, AVI, WebM, TS · Max 1GB
+                        3840×2160 · H.264 · 2min · ~200MB · fast demo · CC BY 4.0
                     </div>
                 </div>
             </label>
@@ -503,12 +537,9 @@ async def video_page(request: Request):
                        onchange="selectSource('meridian_4k')"
                        style="margin-top:0.2rem;accent-color:#00ff99">
                 <div>
-                    <div style="color:#e0e0e0;font-size:0.85rem">
-                        Meridian 4K · Netflix Open Content
-                    </div>
+                    <div style="color:#e0e0e0;font-size:0.85rem">Meridian 4K — full 12 min</div>
                     <div style="color:#555;font-size:0.75rem">
-                        3840×2160 · 59.94fps · H.264 · 12min · 812MB · CC BY 4.0<br>
-                        ⚠ Both mode ~6-8 min total
+                        3840×2160 · 59.94fps · H.264 · 12min · 812MB · CC BY 4.0 · ⚠ Both mode ~6-8 min
                     </div>
                 </div>
             </label>
@@ -768,6 +799,7 @@ async def video_page(request: Request):
             ${{metricRow('GPU base → peak', t.gpu_base + ' → ' + t.gpu_peak, '°C')}}
             ${{pptNote}}
             <div style="margin-top:0.75rem">${{e.confidence.flag}} ${{e.confidence.label}}</div>
+            ${{e.confidence.hint ? '<div style="margin-top:0.35rem;color:#888;font-size:0.72rem">' + e.confidence.hint + '</div>' : ''}}
         </div>`;
     }}
 
@@ -812,6 +844,7 @@ async def video_page(request: Request):
                 <div style="margin-top:0.75rem;font-size:0.8rem">
                     ${{e.confidence.flag}} ${{e.confidence.label}}
                 </div>
+                ${{e.confidence.hint ? '<div style="margin-top:0.3rem;color:#888;font-size:0.7rem">' + e.confidence.hint + '</div>' : ''}}
             </div>`;
         }}
 
@@ -917,10 +950,17 @@ async def run_job(job_id: str, input_path: Path, preset: str, delete_after: bool
                   custom_cmd: str = None, custom_cmd_cpu: str = None, custom_cmd_gpu: str = None):
     try:
         jobs[job_id].update({"status": "running", "stage": "starting"})
-        if preset == "both":
+        _BOTH_PRESETS = {
+            "both":      ("cpu",      "gpu"),
+            "h265_both": ("h265_cpu", "h265_gpu"),
+            "av1_both":  ("av1_cpu",  "av1_gpu"),
+        }
+        if preset in _BOTH_PRESETS:
+            p_cpu, p_gpu = _BOTH_PRESETS[preset]
             result = await run_both_measurement(input_path, job_id, jobs,
                                                 custom_cmd_cpu=custom_cmd_cpu,
-                                                custom_cmd_gpu=custom_cmd_gpu)
+                                                custom_cmd_gpu=custom_cmd_gpu,
+                                                preset_cpu=p_cpu, preset_gpu=p_gpu)
         else:
             result = await run_video_measurement(input_path, job_id, preset, jobs,
                                                  custom_cmd=custom_cmd)
@@ -941,7 +981,7 @@ async def use_preloaded_source(
     custom_cmd_cpu: str = Form(None),
     custom_cmd_gpu: str = Form(None),
 ):
-    if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "av1_cpu"):
+    if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "h265_both", "av1_cpu", "av1_gpu", "av1_both"):
         return JSONResponse({"error": "Invalid preset"}, status_code=400)
 
     source = PRELOADED.get(source_key)
@@ -970,7 +1010,7 @@ async def upload_video(
     custom_cmd_cpu: str = Form(None),
     custom_cmd_gpu: str = Form(None),
 ):
-    if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "av1_cpu"):
+    if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "h265_both", "av1_cpu", "av1_gpu", "av1_both"):
         return JSONResponse({"error": "Invalid preset"}, status_code=400)
 
     allowed = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".ts"}
@@ -1009,9 +1049,11 @@ async def video_preview_cmd(preset: str = "both"):
     from video import PRESETS, build_preset_cmd
     placeholder_in = Path("{input}")
     placeholder_out = Path("{output}")
-    if preset == "both":
-        cpu_cmd = " ".join(build_preset_cmd("cpu", placeholder_in, placeholder_out))
-        gpu_cmd = " ".join(build_preset_cmd("gpu", placeholder_in, placeholder_out))
+    _BOTH_MAP = {"both": ("cpu","gpu"), "h265_both": ("h265_cpu","h265_gpu"), "av1_both": ("av1_cpu","av1_gpu")}
+    if preset in _BOTH_MAP:
+        p_cpu, p_gpu = _BOTH_MAP[preset]
+        cpu_cmd = " ".join(build_preset_cmd(p_cpu, placeholder_in, placeholder_out))
+        gpu_cmd = " ".join(build_preset_cmd(p_gpu, placeholder_in, placeholder_out))
         return {"mode": "both", "cpu_cmd": cpu_cmd, "gpu_cmd": gpu_cmd}
     elif preset in PRESETS:
         cmd = " ".join(build_preset_cmd(preset, placeholder_in, placeholder_out))

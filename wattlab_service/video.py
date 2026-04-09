@@ -109,6 +109,20 @@ PRESETS = {
             str(o)
         ]
     },
+    "av1_gpu": {
+        "label": "AV1 GPU",
+        "detail": "av1_vaapi · QP 28 · 1080p · AMD RX 7800 XT · full pipeline",
+        "cmd": lambda i, o: [
+            "ffmpeg", "-y",
+            "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi",
+            "-vaapi_device", "/dev/dri/renderD128",
+            "-i", str(i),
+            "-vf", "scale_vaapi=-2:1080",
+            "-c:v", "av1_vaapi", "-qp", "28",
+            "-c:a", "aac", "-b:a", "128k",
+            str(o)
+        ]
+    },
 }
 
 POLL_INTERVAL = 1.0
@@ -184,7 +198,12 @@ def confidence(delta_w: float, poll_count: int, w_base: float) -> dict:
     if delta_w > green_thresh and poll_count >= s["conf_green_polls"]:
         return {"flag": "🟢", "label": "Repeatable"}
     elif delta_w >= yellow_thresh or poll_count >= s["conf_yellow_polls"]:
-        return {"flag": "🟡", "label": "Early insight"}
+        result = {"flag": "🟡", "label": "Early insight"}
+        if delta_w > green_thresh and poll_count < s["conf_green_polls"]:
+            ratio = int(round(delta_w / noise_w))
+            result["hint"] = (f"Strong signal ({ratio}× noise floor) — task too short for 🟢. "
+                              f"Use a longer clip or batch mode.")
+        return result
     else:
         return {"flag": "🔴", "label": "Need more data"}
 
@@ -366,7 +385,9 @@ async def run_video_measurement(input_path: Path, job_id: str,
 
 async def run_both_measurement(input_path: Path, job_id: str, jobs: dict = None,
                                custom_cmd_cpu: str = None,
-                               custom_cmd_gpu: str = None) -> dict:
+                               custom_cmd_gpu: str = None,
+                               preset_cpu: str = "cpu",
+                               preset_gpu: str = "gpu") -> dict:
     s = cfg.load()
     if jobs is not None: jobs[job_id]["stage"] = "baseline"
     stopped = focus_mode_enter()
@@ -374,13 +395,13 @@ async def run_both_measurement(input_path: Path, job_id: str, jobs: dict = None,
     LOCK_FILE.write_text(job_id)
     try:
         if jobs is not None: jobs[job_id]["stage"] = "cpu_encode"
-        cpu_result = await run_single(input_path, job_id, "cpu", baseline, custom_cmd_cpu)
+        cpu_result = await run_single(input_path, job_id, preset_cpu, baseline, custom_cmd_cpu)
         if jobs is not None: jobs[job_id]["stage"] = "rest"
         await asyncio.sleep(s["video_cooldown_s"])
         if jobs is not None: jobs[job_id]["stage"] = "baseline_2"
         gpu_baseline = await measure_baseline(polls=s["baseline_polls"])
         if jobs is not None: jobs[job_id]["stage"] = "gpu_encode"
-        gpu_result = await run_single(input_path, job_id, "gpu", gpu_baseline, custom_cmd_gpu)
+        gpu_result = await run_single(input_path, job_id, preset_gpu, gpu_baseline, custom_cmd_gpu)
     finally:
         LOCK_FILE.unlink(missing_ok=True)
         loop = asyncio.get_event_loop()
@@ -405,11 +426,15 @@ async def run_video_measurement_path(path: str, job_id: str, preset_key: str,
 
 async def run_both_measurement_path(path: str, job_id: str,
                                     custom_cmd_cpu: str = None,
-                                    custom_cmd_gpu: str = None) -> dict:
+                                    custom_cmd_gpu: str = None,
+                                    preset_cpu: str = "cpu",
+                                    preset_gpu: str = "gpu") -> dict:
     """Run both measurements on an already-present file (pre-loaded content)."""
     return await run_both_measurement(Path(path), job_id,
                                       custom_cmd_cpu=custom_cmd_cpu,
-                                      custom_cmd_gpu=custom_cmd_gpu)
+                                      custom_cmd_gpu=custom_cmd_gpu,
+                                      preset_cpu=preset_cpu,
+                                      preset_gpu=preset_gpu)
 
 
 # --- Variance calibration ---

@@ -5,11 +5,17 @@ import json
 # Pre-loaded test content registry
 PRELOADED = {
     "meridian_4k": {
-        "label": "Meridian 4K",
+        "label": "Meridian 4K — full",
         "description": "Netflix Open Content · 3840×2160 · 59.94fps · H.264 · 12min · CC BY 4.0",
         "path": Path("/home/gos/wattlab/test_content/meridian_4k.mp4"),
         "credit": "Netflix Open Content (opencontent.netflix.com)",
-    }
+    },
+    "meridian_120s": {
+        "label": "Meridian 4K — 2 min",
+        "description": "Netflix Open Content · 3840×2160 · 59.94fps · H.264 · 2min extract · fast demo",
+        "path": Path("/home/gos/wattlab/test_content/meridian_120s.mp4"),
+        "credit": "Netflix Open Content (opencontent.netflix.com)",
+    },
 }
 
 def get_source_info(key: str) -> dict:
