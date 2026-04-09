@@ -7,6 +7,82 @@ Scope: device layer only (GoS1). Network, CDN, and CPE explicitly excluded.
 
 ---
 
+## Session 12 — 2026-04-10
+
+### What we did
+
+**Preset overhaul · Full GPU pipeline · VAAPI fix · meridian_120s · Confidence hints · Guided tour RAG step · Queue badge · Bug fixes**
+
+#### Video preset UI restructure
+- Three codec rows (H.264 / H.265 / AV1), each with CPU / GPU / Both cards
+- Preset details now collapsible via `<details class="pdesc">` — arrow toggles `▸/▾`, muted grey text
+- `.pspec` class for codec spec line (was inline style); `DEFAULT` badge removed from H.264 Both
+- Source picker: meridian_120s added between upload and full meridian
+
+#### Full GPU pipeline — significant methodology change
+Previously all GPU presets used a **partial pipeline**: ffmpeg CPU software-decoded the 4K input, then GPU-encoded the result. This meant the CPU was working hard during "GPU" jobs — and appeared hotter during GPU runs than CPU runs (counterintuitive but correct: software decode + PCIe DMA heats the IOD).
+
+Now all three GPU codecs use a **full pipeline**:
+```
+-hwaccel vaapi -hwaccel_output_format vaapi -extra_hw_frames 32 -vaapi_device /dev/dri/renderD128
+```
+Frames stay GPU-resident from decode through scale through encode. This represents real live-encoding workflows (Harmonic, Ateme) and cuts CPU thermal load during GPU jobs.
+
+**Impact on energy results** — dramatic:
+| Mode | Duration | Energy | ΔW |
+|---|---|---|---|
+| H.264 CPU | 30.6s | 0.664 Wh 🟢 | 78.2W |
+| H.264 GPU (full) | 17.6s | 0.376 Wh 🟢 | 76.8W |
+| AV1 CPU | 28.2s | 0.586 Wh 🟢 | 74.8W |
+| AV1 GPU (full) | 14.5s | 0.284 Wh 🟢 | 70.5W |
+
+GPU is now faster **and** more energy efficient (H.264: 43% less energy; AV1: 51% less). Old partial-pipeline result (GPU 9.7% more energy) is superseded.
+
+#### VAAPI surface pool fix
+GPU encodes were failing with `Cannot allocate memory` at frame ~7178/7193 (99.8% through a 2-min 4K clip). Root cause: Mesa VA-API exhausts the DMA surface pool when `scale_vaapi` flushes at end-of-stream. The error is in teardown — the muxer had already written the full output file (confirmed: `Lsize=11188kB` in stderr before "Conversion failed!").
+
+Two fixes:
+1. `scale_vaapi=w=-2:h=1080:format=nv12` — explicit pixel format prevents EOS format-renegotiation failure
+2. `out_size_mb` now checks `file.exists() and size > 0` instead of `success=True` — output is valid even when ffmpeg exits non-zero from the EOS teardown error
+
+#### meridian_120s — 2-minute demo extract
+Generated with `ffmpeg -y -ss 0 -i meridian_4k.mp4 -t 120 -c copy meridian_120s.mp4` (123MB). Full Meridian 4K gave only ~8 polls on short GPU jobs (🟡). The 120s extract gives 14–30 polls per job, all 🟢. Added to source picker and `sources.py`.
+
+#### Confidence hint
+`confidence()` now returns an optional `hint` string when signal is strong (ΔW > green threshold) but the task ran too briefly for enough polls (poll count < `conf_green_polls`). Example: *"Strong signal (49× noise floor) — task too short for 🟢. Use a longer clip or batch mode."* Rendered in single and both result cards beneath the flag.
+
+#### Guided tour update
+- 7 steps (was 5): RAG step inserted as step 4 before the Confidence step
+- Page X/Y counter on all steps
+- Previous buttons on steps 1–6
+- Confidence step updated to variance-relative language with formula `noise = (variance%/100) × W_base`
+- RAG result card shows model size, input/output tokens, retrieval_ms, mWh/token, tok/s, confidence per mode
+
+#### Queue badge
+Always-visible fixed bottom-right badge on all pages: polls `/power` + `/queue` every 5s, shows e.g. "52.3 W · ⏱ 2 jobs". Shows watts even when queue is empty.
+
+#### Bug fixes
+- `h265_both`/`av1_both`/`av1_gpu` missing from `STAGES`/`STAGE_MAP` → "Cannot read properties of undefined (reading 'starting')" crash on any new preset. Fixed by adding all new types to both tables.
+- Variance calibration save-before-run: `runVarianceCalibration()` now calls `await saveSettings()` before queuing — previously the live value wasn't saved and the old settings.json value was used.
+- Queue page resume link 404 for variance jobs: `resumeLink()` now skips variance-type jobs.
+- Previous runs: codec displayed (e.g. "H.264 CPU vs H.264 GPU"); `persist.py` both-mode summary includes `cpu_preset`/`gpu_preset`.
+
+### Technical notes
+- Full GPU pipeline: add `-extra_hw_frames 32 -vaapi_device /dev/dri/renderD128` before `-i`; use `scale_vaapi=w=-2:h=1080:format=nv12` (not `scale_vaapi=-2:1080`)
+- `variance_cooldown_s` serves double duty: CPU→GPU gap within a pair AND GPU→next pair gap. 10s is too short (CPU reaches 60°C during H264). Recommended: 60s minimum.
+- Variance calibration uses full `meridian_4k.mp4` (not the 120s extract). With 10 runs + 60s cooldown: ~68 min total.
+- VAAPI "Cannot allocate memory" is an EOS bug in Mesa VA-API, not actual VRAM exhaustion. Output file is valid.
+
+### Deferred (carried forward)
+- DNS + SSL (blocked on DNS rebuild)
+- GPU image generation: first clean measurement run
+- Image page elapsed time in progress bar
+- phi4 (14B): `ollama pull phi4`
+- Transcoding profile documentation (apples-to-apples bitrate/GOP/profile)
+- Confidence multiplier grounding with Tanya
+
+---
+
 ## Session 11 — 2026-04-09
 
 ### What we did

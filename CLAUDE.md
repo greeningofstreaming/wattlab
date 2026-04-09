@@ -1,6 +1,6 @@
 # WattLab — Claude Code Context File
 # Auto-loaded by Claude Code. Keep this current.
-# Last updated: 2026-04-09
+# Last updated: 2026-04-10
 # See also: GOS1_INFRA.md — server infrastructure, Nextcloud backup, personal stack context
 
 ## Project Identity
@@ -213,6 +213,28 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] `/methodology` confidence section updated to explain variance-relative approach
 - [x] CLAUDE.md/JOURNAL.md updated; SSH tunnel URL clarified (localhost:8000, not 192.168.1.62)
 
+### Session 12 — Preset Overhaul, Full GPU Pipeline, VAAPI Fix (2026-04-10) ✅
+- [x] Video presets restructured: 3 rows (H.264 / H.265 / AV1), each with CPU / GPU / Both cards
+  - Details collapsible via `<details class="pdesc">` with `▸/▾` toggle
+  - `DEFAULT` badge removed; `.pspec` class for codec spec line
+- [x] All GPU presets switched to **full pipeline** (hwaccel vaapi decode + encode)
+  - Was: partial pipeline (CPU software decode + GPU encode) — CPU was heating on GPU jobs
+  - Now: `-hwaccel vaapi -hwaccel_output_format vaapi` decode + `scale_vaapi` + encoder
+  - Represents real live-encoding workflows (Harmonic, Ateme). See Key Findings.
+- [x] `av1_gpu` preset added (av1_vaapi, QP 28, full pipeline, RDNA3 AV1 engine)
+- [x] `h265_both` and `av1_both` presets wired through all endpoints and STAGES/STAGE_MAP
+- [x] VAAPI surface pool fix: `-extra_hw_frames 32` + `scale_vaapi=w=-2:h=1080:format=nv12`
+  - Fixes "Cannot allocate memory" at frame ~7178/7193 (EOS filter flush bug in Mesa VA-API)
+  - `out_size_mb` now also reports from file-on-disk (not gated on `success=True`) — muxer writes valid file even when ffmpeg exits non-zero from the EOS error
+- [x] Confidence hint: `confidence()` returns `hint` field when signal strong but polls < green threshold; rendered in single and both result cards
+- [x] `meridian_120s` source: 2-min extract of Meridian 4K (123MB, ~7200 frames) — fast demo mode
+  - Gives 14–30 polls per GPU/CPU job, all 🟢; added to video page source picker
+  - Generated with: `ffmpeg -y -ss 0 -i meridian_4k.mp4 -t 120 -c copy meridian_120s.mp4`
+- [x] Queue badge: bottom-right on all pages, shows live watts + queued job count
+- [x] Guided tour: 7 steps, RAG step added (step 4), page X/Y counter, Previous buttons on all steps; confidence step updated to variance-relative language
+- [x] Settings: three read-only variance calibration output fields (idle/cpu/gpu pct); save-before-run fix; stage labels `run N/M — H.264 CPU encode`; `variance_runs` slider min=2
+- [x] Previous runs: codec displayed (e.g. "H.264 CPU vs H.264 GPU"); `persist.py` both-mode summary adds `cpu_preset`/`gpu_preset`
+
 ### Deferred
 - [ ] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` — DNS table wiped during Wix ownership transfer (Dom → Ben). Rebuild needed.
 - [ ] SSL: `sudo certbot --nginx -d wattlab.greeningofstreaming.org` — after DNS restored. Note: use `systemctl restart nginx` (not reload) after certbot edits config.
@@ -221,14 +243,23 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [ ] phi4 pull: `ollama pull phi4` (9.1GB) — enables 14B model in RAG compare
 - [ ] Confidence multiplier grounding: working session with Tanya — `variance_green_x`/`variance_yellow_x` (5×/2×) currently by judgement; need statistical grounding from calibration run data
 - [ ] Transcoding profile documentation: confirm H.264/H.265/AV1 presets are apples-to-apples (same bitrate target, GOP, profile level) — work with Simon/Tanya
-- [ ] CPU temp under GPU load: investigate why CPU heats more during GPU encode than CPU encode
 
 ## Key Findings to Date
 
-### Video H.264 1080p from 4K (Meridian, 4 runs) 🟢
-- CPU: 174.3s, 4.06 Wh mean — faster AND more energy efficient
-- GPU: 114.0s, 4.42 Wh mean
-- GPU 34.5% faster, 9.7% more energy on this workload
+### Video — Full GPU Pipeline vs CPU (Meridian 120s extract, H.264 Both) 🟢
+- CPU (libx264 · CRF 23): 30.6s, 0.664 Wh, 78.2W delta
+- GPU (h264_vaapi · full pipeline): 17.6s, 0.376 Wh, 76.8W delta
+- GPU **42.5% faster, 43.4% less energy** — full pipeline eliminates the CPU decode overhead
+- Note: old partial-pipeline result (4 runs on full 12-min file) showed GPU as 9.7% *more* energy — that was CPU-decode + GPU-encode, measuring worst of both worlds
+
+### Video — H.264 1080p from 4K (Meridian full, 4 runs, partial pipeline — superseded) 🟢
+- CPU: 174.3s, 4.06 Wh mean; GPU: 114.0s, 4.42 Wh mean
+- GPU was 34.5% faster but 9.7% more energy — partial pipeline artifact, not representative of live encoding
+
+### Video — AV1 Both (Meridian 120s, first run) 🟢
+- CPU (libsvtav1 · CRF 30): 28.2s, 0.586 Wh, 74.8W delta
+- GPU (av1_vaapi · full pipeline): 14.5s, 0.284 Wh, 70.5W delta
+- GPU **48.6% faster, 51.5% less energy**
 
 ### LLM Cold Inference 🟢/🟡
 - Mistral 7B T3: 0.943 mWh/token 🟢
