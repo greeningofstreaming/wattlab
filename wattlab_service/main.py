@@ -3055,7 +3055,8 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     <div class="band-label">What this shows</div>
     <p style="color:#aaa;line-height:1.8;max-width:560px">
       Whether retrieval-augmented generation (RAG) — searching a local corpus
-      before answering — costs meaningfully more energy than plain inference.
+      before answering — costs meaningfully more energy than plain inference,
+      and see the difference in context size the model must process.
     </p>
   </div>
 
@@ -3621,23 +3622,44 @@ function pollDemoRAG(jobId, t0) {{
 function renderRAGResult(r, savedAt, isPrev) {{
   const prevNote = isPrev ? '<p class="prev-note">↩ Previous run · ' + timeAgo(savedAt) + '</p>' : '';
   const modes = ['baseline', 'rag', 'rag_large'];
-  const labels = {{'baseline': 'Baseline', 'rag': 'RAG', 'rag_large': 'RAG Large'}};
+  const labels = {{'baseline': 'No retrieval', 'rag': 'RAG', 'rag_large': 'RAG Large'}};
   const results = r.results || {{}};
-  let kpis = '';
+  const modelLine = r.model_label
+    ? `<div style="font-family:monospace;font-size:0.78rem;color:#555;margin-bottom:1rem">
+         Model: ${{r.model_label}}${{r.model_params ? ' · ' + r.model_params : ''}}</div>`
+    : '';
+  let cols = '';
   modes.forEach(m => {{
     const res = results[m];
     if (!res) return;
     const e = res.energy || {{}}, inf = res.inference || {{}};
-    kpis += `<div class="kpi">
-      <div class="val">${{fmt(e.mwh_per_token, 3)}}</div>
-      <div class="lbl">${{labels[m]}} mWh/tok</div>
-      <div style="font-size:0.72rem;color:#444;margin-top:0.15rem">
-        ${{fmt(inf.tokens_per_sec,1)}} tok/s · ${{e.confidence ? e.confidence.flag : ''}}</div>
+    const inTok = inf.input_tokens != null ? inf.input_tokens : '—';
+    const outTok = inf.output_tokens != null ? inf.output_tokens : '—';
+    const retMs = res.retrieval_ms > 0 ? fmt(res.retrieval_ms, 0) + ' ms retrieval' : 'no retrieval';
+    cols += `<div style="flex:1;min-width:130px;border-left:2px solid #1a1a1a;padding-left:0.75rem">
+      <div style="font-family:monospace;font-size:0.78rem;color:#555;margin-bottom:0.5rem">${{labels[m]}}</div>
+      <div class="kpi" style="margin-bottom:0.4rem">
+        <div class="val">${{fmt(e.mwh_per_token, 3)}}</div>
+        <div class="lbl">mWh / token</div>
+      </div>
+      <div style="font-size:0.75rem;color:#444;line-height:1.8">
+        ${{fmt(inf.tokens_per_sec, 1)}} tok/s<br>
+        ${{inTok}} in · ${{outTok}} out tokens<br>
+        ${{retMs}}<br>
+        ${{e.confidence ? e.confidence.flag + ' ' + e.confidence.label : ''}}
+      </div>
     </div>`;
   }});
   document.getElementById('rag-status').innerHTML = prevNote +
-    `<div class="result-card"><div class="kpi-row">${{kpis}}</div>
-     <p class="scope-note">Device layer only. Retrieval overhead is real but modest.</p></div>`;
+    `<div class="result-card">
+       ${{modelLine}}
+       <div style="display:flex;gap:1rem;flex-wrap:wrap">${{cols}}</div>
+       <p class="scope-note" style="margin-top:1rem">
+         Input tokens show how much context the model processes per mode —
+         retrieval grows the prompt significantly.<br>
+         Device layer only. Network excluded.
+       </p>
+     </div>`;
   document.getElementById('rag-btns').style.display = 'none';
   revealNext(4);
 }}
