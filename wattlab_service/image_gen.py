@@ -7,15 +7,14 @@ import subprocess
 import time
 import json
 from pathlib import Path
-from dotenv import dotenv_values
-from tapo import ApiClient
 from video import focus_mode_enter, focus_mode_exit
 import settings as cfg
+from power import get_power_watts
 
 # Required for gfx1101 (RX 7800 XT) with PyTorch ROCm — must be set before torch import
 os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.0.0")
 
-config = dotenv_values("/home/gos/wattlab/.env")
+
 LOCK_FILE = Path("/tmp/gos-measure.lock")
 
 # Prompt colour/mood modifiers for variation per run (anti-slideware proof)
@@ -36,20 +35,6 @@ IMAGE_STEPS_GPU = 20       # ~2s per image on RX 7800 XT — need batch for reli
 IMAGE_STEPS = IMAGE_STEPS_CPU  # default / backwards compat
 IMAGE_SIZE = 512           # px, square
 GPU_BATCH_SIZE = 5         # GPU generates 5 images (~10s total) → report energy/image = total/5
-
-# --- P110 helpers ---
-
-async def get_power_watts() -> float:
-    for attempt in range(3):
-        try:
-            client = ApiClient(config["TAPO_EMAIL"], config["TAPO_PASSWORD"])
-            device = await client.p110(config["TAPO_P110_IP"])
-            result = await device.get_energy_usage()
-            return result.current_power / 1000
-        except Exception:
-            if attempt == 2:
-                raise
-            await asyncio.sleep(1)
 
 async def measure_baseline(polls: int = 10) -> float:
     readings = []

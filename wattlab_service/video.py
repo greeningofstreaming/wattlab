@@ -4,11 +4,8 @@ import subprocess
 import time
 import json
 from pathlib import Path
-from dotenv import dotenv_values
-from tapo import ApiClient
 import settings as cfg
-
-config = dotenv_values("/home/gos/wattlab/.env")
+from power import get_power_watts
 UPLOAD_DIR = Path("/tmp/wattlab_uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 LOCK_FILE = Path("/tmp/gos-measure.lock")
@@ -152,20 +149,6 @@ def read_sensors() -> dict:
         }
     except Exception as e:
         return {"cpu_tctl": None, "gpu_junction": None, "gpu_ppt_w": None, "error": str(e)}
-
-# --- P110 ---
-
-async def get_power_watts() -> float:
-    for attempt in range(3):
-        try:
-            client = ApiClient(config["TAPO_EMAIL"], config["TAPO_PASSWORD"])
-            device = await client.p110(config["TAPO_P110_IP"])
-            result = await device.get_energy_usage()
-            return result.current_power / 1000
-        except Exception:
-            if attempt == 2:
-                raise
-            await asyncio.sleep(1)
 
 async def measure_baseline(polls: int = 10) -> dict:
     power_readings = []

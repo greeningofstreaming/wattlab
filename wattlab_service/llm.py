@@ -5,11 +5,8 @@ import time
 import json
 import urllib.request
 from pathlib import Path
-from dotenv import dotenv_values
-from tapo import ApiClient
 import settings as cfg
-
-config = dotenv_values("/home/gos/wattlab/.env")
+from power import get_power_watts
 LOCK_FILE = Path("/tmp/gos-measure.lock")
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -37,20 +34,6 @@ MODELS = {
     "tinyllama": {"label": "TinyLlama", "size": "637MB", "params": "1.1B"},
     "mistral": {"label": "Mistral 7B", "size": "4.4GB", "params": "7B"},
 }
-
-# --- P110 helpers (same as video.py) ---
-
-async def get_power_watts() -> float:
-    for attempt in range(3):
-        try:
-            client = ApiClient(config["TAPO_EMAIL"], config["TAPO_PASSWORD"])
-            device = await client.p110(config["TAPO_P110_IP"])
-            result = await device.get_energy_usage()
-            return result.current_power / 1000
-        except Exception:
-            if attempt == 2:
-                raise
-            await asyncio.sleep(1)
 
 async def measure_baseline(polls: int = 10) -> float:
     readings = []

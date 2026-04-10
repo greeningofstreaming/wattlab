@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from dotenv import dotenv_values
-from tapo import ApiClient
+from power import get_power_watts
 from video import run_video_measurement, run_both_measurement, run_all_measurement, run_video_measurement_path, run_both_measurement_path, UPLOAD_DIR, LOCK_FILE
 from sources import get_all_sources, PRELOADED
 from llm import run_llm_measurement, run_llm_batch_measurement, run_llm_both_measurement, MODELS, TASKS
@@ -259,20 +259,6 @@ function wlRenderQueued(pos) {
         + '</div>';
 }
 </script>"""
-
-# --- P110 ---
-
-async def get_power_watts() -> float:
-    for attempt in range(3):
-        try:
-            client = ApiClient(config["TAPO_EMAIL"], config["TAPO_PASSWORD"])
-            device = await client.p110(config["TAPO_P110_IP"])
-            result = await device.get_energy_usage()
-            return result.current_power / 1000
-        except Exception:
-            if attempt == 2:
-                raise
-            await asyncio.sleep(1)
 
 # --- Home ---
 
