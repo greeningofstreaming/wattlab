@@ -7,6 +7,78 @@ Scope: device layer only (GoS1). Network, CDN, and CPE explicitly excluded.
 
 ---
 
+## Session 13 — 2026-04-10
+
+### What we did
+
+**ABR benchmark · Compare all codecs · HTTPS · CSV/output fixes · Deferred roadmap tidy**
+
+#### ABR rate control — methodology fix
+All six video presets (H.264/H.265/AV1 × CPU/GPU) previously used different rate-control modes: CRF for software encoders, QP for hardware. These are not equivalent — CRF is adaptive (targets quality), QP is fixed (targets quantisation). Output file sizes differed, meaning CPU and GPU were not being given the same task.
+
+Fixed by switching all presets to ABR (`-b:v Nk`) with a shared bitrate target per codec:
+- H.264: 4000 kbps · H.265: 2000 kbps · AV1: 1500 kbps
+
+Targets are stored in settings (`h264_bitrate_kbps`, `h265_bitrate_kbps`, `av1_bitrate_kbps`) and editable in the Settings page. CPU and GPU now produce near-identical output file sizes, displayed in results as confirmation.
+
+PRESETS refactored: `cmd(i,o)` → `cmd_fn(i,o,bps)` + `detail_fn(bps)` + `bitrate_key`. Helper `_preset_bps(preset_key, s)` resolves the correct setting at runtime.
+
+#### Compare all codecs
+New `all_codecs` preset mode runs all six presets sequentially in three codec pairs (H.264 CPU→GPU, H.265 CPU→GPU, AV1 CPU→GPU) with cooldown between each pair.
+
+Backend:
+- `run_all_measurement()` in `video.py`: queues 3 pairs, collects per-codec results
+- `analyse_all(codecs)`: cross-codec summary — most energy-efficient preset, fastest preset, per-codec winner
+- `persist.py`: `_summarise` and `_video_rows` updated for `all_codecs` mode
+- Stage map: 12-stage `_ALL_STAGES` + `_ALL_MAP` wired into STAGES/STAGE_MAP
+
+UI result card (`renderAllCodecs()`):
+- Matrix table: Codec × (CPU time / CPU energy / CPU out / GPU time / GPU energy / GPU out / Conf)
+- Output size in separate per-side columns (not a combined column) — confirms bitrate parity
+- Highlights: most efficient preset + fastest preset
+- Collapsible per-codec detail cards with full thermal breakdown
+- Footnote: "CPU out / GPU out should match — confirms same bitrate target"
+
+#### HTTPS
+DNS A record for `wattlab.greeningofstreaming.org → 176.148.88.254` restored (was wiped during Wix domain transfer). Certbot provisioned: `sudo certbot --nginx -d wattlab.greeningofstreaming.org` + `sudo systemctl restart nginx`. Service now live at https://wattlab.greeningofstreaming.org.
+
+#### CSV and output size fixes
+- `output_size_mb` added to video CSV (`_video_result_row` + fieldnames)
+- Full thermals now in CSV: added `cpu_mean`, `gpu_mean`, `gpu_ppt_peak_w` alongside existing `cpu_base/peak`, `gpu_base/peak`, `gpu_ppt_mean_w`
+- All-codecs matrix: output size split into separate "CPU out" / "GPU out" columns (previously a single combined column appearing after GPU energy)
+
+#### Results — ABR all-codecs benchmark (3 runs, all 🟢)
+Meridian 120s extract (4K → 1080p), ABR targets as above, full GPU pipeline:
+
+| Codec | CPU | GPU | GPU energy saving | GPU speed gain |
+|---|---|---|---|---|
+| H.264 | 37.3s / 0.83 Wh | 17.5s / 0.37 Wh | ~55% | ~53% |
+| H.265 | 70.3s / 1.58 Wh | 14.5s / 0.29 Wh | ~81% | ~79% |
+| AV1   | 30.8s / 0.65 Wh | 14.5s / 0.30 Wh | ~55% | ~53% |
+
+Notable observations:
+- H.265 and AV1 GPU both encode in exactly 14.5s — VAAPI hardware clock is the ceiling on the GPU path
+- AV1 CPU outperforms H.265 CPU on both speed and energy (SVT-AV1 multi-core optimisation)
+- Most energy-efficient preset: AV1 GPU and H.265 GPU (~0.29 Wh) — gap within noise, more runs needed
+- Results reproduced across 3 runs to within 1%
+
+#### Deferred roadmap updates
+- CPU temp under GPU load: **closed** — full pipeline (session 12) resolved this
+- DNS + SSL: **closed** — done this session
+- Added: Benchmark 2 (representative real-world CRF/QP presets), main.py refactor, Docker containerisation
+
+### Deferred (carried forward)
+- Image page elapsed time in progress bar
+- GPU image generation: first clean measurement run
+- phi4: `ollama pull phi4`
+- Confidence multiplier grounding with Tanya (5×/2× thresholds still by judgement)
+- Transcoding profile documentation: GOP structure and profile level (bitrate now standardised)
+- Benchmark 2: representative real-world presets (CRF/QP, codec-natural rate control)
+- main.py refactor (routes/, Jinja templates, typed models, tests)
+- Docker containerisation (two-stage plan; see CLAUDE.md)
+
+---
+
 ## Session 12 — 2026-04-10
 
 ### What we did

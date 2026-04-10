@@ -60,8 +60,10 @@ def to_csv(job_type: str, data: dict) -> str:
     elif job_type == "video":
         fieldnames = [
             "job_id", "saved_at", "mode", "preset", "duration_s",
+            "output_size_mb",
             "w_base", "w_task", "delta_w", "delta_e_wh", "poll_count", "confidence",
-            "cpu_base", "cpu_peak", "gpu_base", "gpu_peak", "gpu_ppt_mean_w",
+            "cpu_base", "cpu_peak", "cpu_mean",
+            "gpu_base", "gpu_peak", "gpu_mean", "gpu_ppt_mean_w", "gpu_ppt_peak_w",
             "ffmpeg_cmd",
         ]
         rows = _video_rows(data)
@@ -250,13 +252,14 @@ def _video_result_row(common: dict, r: dict) -> dict:
         **common,
         "preset": r.get("preset_label"),
         "duration_s": e.get("delta_t_s"),
+        "output_size_mb": r.get("output_size_mb"),
         "w_base": e.get("w_base"), "w_task": e.get("w_task"),
         "delta_w": e.get("delta_w"), "delta_e_wh": e.get("delta_e_wh"),
         "poll_count": e.get("poll_count"),
         "confidence": e.get("confidence", {}).get("label"),
-        "cpu_base": t.get("cpu_base"), "cpu_peak": t.get("cpu_peak"),
-        "gpu_base": t.get("gpu_base"), "gpu_peak": t.get("gpu_peak"),
-        "gpu_ppt_mean_w": t.get("gpu_ppt_mean_w"),
+        "cpu_base": t.get("cpu_base"), "cpu_peak": t.get("cpu_peak"), "cpu_mean": t.get("cpu_mean"),
+        "gpu_base": t.get("gpu_base"), "gpu_peak": t.get("gpu_peak"), "gpu_mean": t.get("gpu_mean"),
+        "gpu_ppt_mean_w": t.get("gpu_ppt_mean_w"), "gpu_ppt_peak_w": t.get("gpu_ppt_peak_w"),
         "ffmpeg_cmd": r.get("transcode", {}).get("ffmpeg_cmd", ""),
     }
 

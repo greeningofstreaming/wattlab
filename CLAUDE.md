@@ -1,6 +1,6 @@
 # WattLab — Claude Code Context File
 # Auto-loaded by Claude Code. Keep this current.
-# Last updated: 2026-04-10
+# Last updated: 2026-04-10 (Session 13)
 # See also: GOS1_INFRA.md — server infrastructure, Nextcloud backup, personal stack context
 
 ## Project Identity
@@ -213,6 +213,15 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] `/methodology` confidence section updated to explain variance-relative approach
 - [x] CLAUDE.md/JOURNAL.md updated; SSH tunnel URL clarified (localhost:8000, not 192.168.1.62)
 
+### Session 13 — ABR Benchmark, Compare All Codecs, HTTPS, CSV/Output fixes (2026-04-10) ✅
+- [x] **ABR rate control** across all 6 presets — replaced CRF (CPU) and QP (GPU) with `-b:v Nk` shared bitrate target per codec (H.264: 4000 kbps, H.265: 2000 kbps, AV1: 1500 kbps). CPU and GPU now receive identical tasks; output file sizes match as confirmation. Settings: `h264_bitrate_kbps`, `h265_bitrate_kbps`, `av1_bitrate_kbps` (editable in Settings page).
+- [x] **Compare all codecs** — new `all_codecs` preset runs all 6 presets (3 codec pairs, sequential with cooldown). Returns energy matrix with `analyse_all()` cross-codec summary. UI: matrix table (CPU time/energy/output · GPU time/energy/output · conf per codec), highlights for most efficient + fastest, collapsible per-codec detail cards.
+- [x] Output size columns split in all-codecs matrix — was a single combined "CPU/GPU" column after GPU; now separate "CPU out" and "GPU out" columns adjacent to their respective energy columns
+- [x] CSV export: `output_size_mb` added; full thermals now exported (`cpu_mean`, `gpu_mean`, `gpu_ppt_peak_w` added alongside existing base/peak fields)
+- [x] HTTPS: DNS A record restored, certbot provisioned, nginx restarted. Service live at https://wattlab.greeningofstreaming.org
+- [x] Docker containerisation added to deferred roadmap (two-stage plan; see Deferred)
+- [x] CPU temp under GPU load: closed — full GPU pipeline (session 12) resolved this; frames GPU-resident throughout, CPU decode overhead eliminated
+
 ### Session 12 — Preset Overhaul, Full GPU Pipeline, VAAPI Fix (2026-04-10) ✅
 - [x] Video presets restructured: 3 rows (H.264 / H.265 / AV1), each with CPU / GPU / Both cards
   - Details collapsible via `<details class="pdesc">` with `▸/▾` toggle
@@ -236,13 +245,17 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] Previous runs: codec displayed (e.g. "H.264 CPU vs H.264 GPU"); `persist.py` both-mode summary adds `cpu_preset`/`gpu_preset`
 
 ### Deferred
-- [ ] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` — DNS table wiped during Wix ownership transfer (Dom → Ben). Rebuild needed.
-- [ ] SSL: `sudo certbot --nginx -d wattlab.greeningofstreaming.org` — after DNS restored. Note: use `systemctl restart nginx` (not reload) after certbot edits config.
+- [x] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` — restored 2026-04-10
+- [x] SSL: certbot provisioned 2026-04-10. Service now at https://wattlab.greeningofstreaming.org
+- [x] CPU temp under GPU load: resolved by full GPU pipeline switch (session 12) — frames stay GPU-resident, CPU no longer involved in decode/DMA
 - [ ] Image page progress bar: add elapsed time (video + LLM already have it)
 - [ ] GPU image generation: code complete, needs first clean measurement run
 - [ ] phi4 pull: `ollama pull phi4` (9.1GB) — enables 14B model in RAG compare
 - [ ] Confidence multiplier grounding: working session with Tanya — `variance_green_x`/`variance_yellow_x` (5×/2×) currently by judgement; need statistical grounding from calibration run data
-- [ ] Transcoding profile documentation: confirm H.264/H.265/AV1 presets are apples-to-apples (same bitrate target, GOP, profile level) — work with Simon/Tanya
+- [ ] Transcoding profile documentation: GOP structure and profile level not yet confirmed apples-to-apples across codecs — bitrate target is now standardised (ABR), but GOP/profile still TBD. Work with Simon/Tanya.
+- [ ] Benchmark 2: representative real-world presets — CRF (CPU) and QP (GPU), codec-appropriate rate control. Benchmark 1 (ABR, current) ensures identical task; Benchmark 2 would show each codec at its natural operating point. Add to WATTLAB_SPEC.md.
+- [ ] main.py refactor: split into routes/, Jinja templates, typed models, tests. Raised in session 8 external audit. Valid technical debt; deferred until post-demo.
+- [ ] Dockerize WattLab service — isolate from future GoS1 projects. Stage 1: FastAPI + VAAPI (`--device /dev/dri`), `--network host`, drop or proxy focus mode via thin host helper socket service. Stage 2 (later, if portability needed): full ROCm image for GPU image gen. Ollama stays as host systemd service, accessed over host network. See conversation 2026-04-10 for full analysis.
 
 ## Key Findings to Date
 
@@ -260,6 +273,16 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - CPU (libsvtav1 · CRF 30): 28.2s, 0.586 Wh, 74.8W delta
 - GPU (av1_vaapi · full pipeline): 14.5s, 0.284 Wh, 70.5W delta
 - GPU **48.6% faster, 51.5% less energy**
+
+### Video — ABR All-Codecs benchmark (Meridian 120s, 3 runs, all 🟢) — Session 13
+All presets on ABR (H.264: 4000 kbps, H.265: 2000 kbps, AV1: 1500 kbps). GPU full pipeline throughout.
+- H.264: CPU 37.3s / 0.83 Wh · GPU 17.5s / 0.37 Wh → GPU **~55% less energy, ~53% faster**
+- H.265: CPU 70.3s / 1.58 Wh · GPU 14.5s / 0.29 Wh → GPU **~81% less energy, ~79% faster**
+- AV1:  CPU 30.8s / 0.65 Wh · GPU 14.5s / 0.30 Wh → GPU **~55% less energy, ~53% faster**
+- Most energy-efficient preset: AV1 GPU (~0.29–0.31 Wh) and H.265 GPU (~0.29 Wh) — gap within noise
+- H.265 and AV1 GPU both encode at exactly 14.5s — VAAPI hardware clock is the ceiling on the GPU path
+- AV1 CPU outperforms H.265 CPU on both speed and energy — SVT-AV1 multi-core optimisation
+- Results reproduced across 3 runs to within 1%; supersedes all CRF/QP comparisons
 
 ### LLM Cold Inference 🟢/🟡
 - Mistral 7B T3: 0.943 mWh/token 🟢

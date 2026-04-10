@@ -931,9 +931,10 @@ async def video_page(request: Request):
                 <td style="color:#e0e0e0;font-weight:bold">${{label}}</td>
                 <td>${{fmt(ce.delta_t_s)}}s</td>
                 <td style="color:${{ew==='CPU'?'#00ff99':'#888'}}">${{fmt(ce.delta_e_wh)}} Wh ${{cpuWin}}</td>
+                <td style="color:#555;font-size:0.75rem">${{fmt(cd.cpu.output_size_mb)}} MB</td>
                 <td>${{fmt(ge.delta_t_s)}}s</td>
                 <td style="color:${{ew==='GPU'?'#00ff99':'#888'}}">${{fmt(ge.delta_e_wh)}} Wh ${{gpuWin}}</td>
-                <td style="color:#555;font-size:0.75rem">${{fmt(cd.cpu.output_size_mb)}} / ${{fmt(cd.gpu.output_size_mb)}} MB</td>
+                <td style="color:#555;font-size:0.75rem">${{fmt(cd.gpu.output_size_mb)}} MB</td>
                 <td style="font-size:0.78rem">${{ce.confidence.flag}} ${{ge.confidence.flag}}</td>
             </tr>`;
         }}).join('');
@@ -985,14 +986,15 @@ async def video_page(request: Request):
                     <th style="text-align:left;padding:0.3rem 0.5rem 0.5rem 0">Codec</th>
                     <th style="text-align:right;padding:0.3rem 0.5rem">CPU time</th>
                     <th style="text-align:right;padding:0.3rem 0.5rem">CPU energy</th>
+                    <th style="text-align:right;padding:0.3rem 0.5rem">CPU out</th>
                     <th style="text-align:right;padding:0.3rem 0.5rem">GPU time</th>
                     <th style="text-align:right;padding:0.3rem 0.5rem">GPU energy</th>
-                    <th style="text-align:right;padding:0.3rem 0.5rem">Output CPU/GPU</th>
+                    <th style="text-align:right;padding:0.3rem 0.5rem">GPU out</th>
                     <th style="text-align:center;padding:0.3rem 0.5rem">Conf</th>
                 </tr></thead>
                 <tbody style="font-family:monospace">${{tableRows}}</tbody>
             </table>
-            <div style="font-size:0.7rem;color:#333;margin-bottom:0.25rem">✓ energy winner · 🏁 speed winner · CPU/GPU output sizes should match — confirms same target bitrate</div>
+            <div style="font-size:0.7rem;color:#333;margin-bottom:0.25rem">✓ energy winner · 🏁 speed winner · CPU out / GPU out should match — confirms same bitrate target</div>
             ${{highlights}}
             <div style="margin-top:1rem;color:#555;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Per-codec detail</div>
             ${{details}}
