@@ -50,10 +50,11 @@ def focus_mode_exit(stopped: list):
 PRESETS = {
     "cpu": {
         "label": "H.264 CPU",
-        "detail": "libx264 · CRF 23 · 1080p · 24 cores",
-        "cmd": lambda i, o: [
+        "bitrate_key": "h264_bitrate_kbps",
+        "detail_fn": lambda bps: f"libx264 · {bps} kbps ABR · 1080p · 24 cores",
+        "cmd_fn": lambda i, o, bps: [
             "ffmpeg", "-y", "-i", str(i),
-            "-c:v", "libx264", "-crf", "23",
+            "-c:v", "libx264", "-b:v", f"{bps}k",
             "-vf", "scale=-2:1080",
             "-c:a", "aac", "-b:a", "128k",
             str(o)
@@ -61,25 +62,27 @@ PRESETS = {
     },
     "gpu": {
         "label": "H.264 GPU",
-        "detail": "h264_vaapi · QP 23 · 1080p · AMD RX 7800 XT · full pipeline",
-        "cmd": lambda i, o: [
+        "bitrate_key": "h264_bitrate_kbps",
+        "detail_fn": lambda bps: f"h264_vaapi · {bps} kbps ABR · 1080p · full pipeline",
+        "cmd_fn": lambda i, o, bps: [
             "ffmpeg", "-y",
             "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi",
             "-extra_hw_frames", "32",
             "-vaapi_device", "/dev/dri/renderD128",
             "-i", str(i),
             "-vf", "scale_vaapi=w=-2:h=1080:format=nv12",
-            "-c:v", "h264_vaapi", "-qp", "23",
+            "-c:v", "h264_vaapi", "-b:v", f"{bps}k",
             "-c:a", "aac", "-b:a", "128k",
             str(o)
         ]
     },
     "h265_cpu": {
         "label": "H.265 CPU",
-        "detail": "libx265 · CRF 28 · 1080p · 24 cores",
-        "cmd": lambda i, o: [
+        "bitrate_key": "h265_bitrate_kbps",
+        "detail_fn": lambda bps: f"libx265 · {bps} kbps ABR · 1080p · 24 cores",
+        "cmd_fn": lambda i, o, bps: [
             "ffmpeg", "-y", "-i", str(i),
-            "-c:v", "libx265", "-crf", "28",
+            "-c:v", "libx265", "-b:v", f"{bps}k",
             "-vf", "scale=-2:1080",
             "-c:a", "aac", "-b:a", "128k",
             str(o)
@@ -87,25 +90,27 @@ PRESETS = {
     },
     "h265_gpu": {
         "label": "H.265 GPU",
-        "detail": "hevc_vaapi · QP 28 · 1080p · AMD RX 7800 XT · full pipeline",
-        "cmd": lambda i, o: [
+        "bitrate_key": "h265_bitrate_kbps",
+        "detail_fn": lambda bps: f"hevc_vaapi · {bps} kbps ABR · 1080p · full pipeline",
+        "cmd_fn": lambda i, o, bps: [
             "ffmpeg", "-y",
             "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi",
             "-extra_hw_frames", "32",
             "-vaapi_device", "/dev/dri/renderD128",
             "-i", str(i),
             "-vf", "scale_vaapi=w=-2:h=1080:format=nv12",
-            "-c:v", "hevc_vaapi", "-qp", "28",
+            "-c:v", "hevc_vaapi", "-b:v", f"{bps}k",
             "-c:a", "aac", "-b:a", "128k",
             str(o)
         ]
     },
     "av1_cpu": {
         "label": "AV1 CPU",
-        "detail": "libsvtav1 · CRF 30 · 1080p · 24 cores",
-        "cmd": lambda i, o: [
+        "bitrate_key": "av1_bitrate_kbps",
+        "detail_fn": lambda bps: f"libsvtav1 · {bps} kbps ABR · 1080p · 24 cores",
+        "cmd_fn": lambda i, o, bps: [
             "ffmpeg", "-y", "-i", str(i),
-            "-c:v", "libsvtav1", "-crf", "30",
+            "-c:v", "libsvtav1", "-b:v", f"{bps}k",
             "-vf", "scale=-2:1080",
             "-c:a", "aac", "-b:a", "128k",
             str(o)
@@ -113,20 +118,24 @@ PRESETS = {
     },
     "av1_gpu": {
         "label": "AV1 GPU",
-        "detail": "av1_vaapi · QP 28 · 1080p · AMD RX 7800 XT · full pipeline",
-        "cmd": lambda i, o: [
+        "bitrate_key": "av1_bitrate_kbps",
+        "detail_fn": lambda bps: f"av1_vaapi · {bps} kbps ABR · 1080p · full pipeline",
+        "cmd_fn": lambda i, o, bps: [
             "ffmpeg", "-y",
             "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi",
             "-extra_hw_frames", "32",
             "-vaapi_device", "/dev/dri/renderD128",
             "-i", str(i),
             "-vf", "scale_vaapi=w=-2:h=1080:format=nv12",
-            "-c:v", "av1_vaapi", "-qp", "28",
+            "-c:v", "av1_vaapi", "-b:v", f"{bps}k",
             "-c:a", "aac", "-b:a", "128k",
             str(o)
         ]
     },
 }
+
+def _preset_bps(preset_key: str, s: dict) -> int:
+    return int(s.get(PRESETS[preset_key]["bitrate_key"], 4000))
 
 POLL_INTERVAL = 1.0
 
@@ -214,7 +223,9 @@ def confidence(delta_w: float, poll_count: int, w_base: float) -> dict:
 
 def build_preset_cmd(preset_key: str, input_path, output_path) -> list:
     """Return the ffmpeg command list for a preset (no nice prefix)."""
-    return PRESETS[preset_key]["cmd"](Path(input_path), Path(output_path))
+    s = cfg.load()
+    bps = _preset_bps(preset_key, s)
+    return PRESETS[preset_key]["cmd_fn"](Path(input_path), Path(output_path), bps)
 
 
 def apply_custom_cmd(custom_cmd: str, input_path, output_path) -> list:
@@ -240,7 +251,9 @@ def transcode(cmd: list) -> dict:
 
 async def run_single(input_path: Path, job_id: str, preset_key: str,
                      baseline: dict, custom_cmd: str = None) -> dict:
+    s = cfg.load()
     preset = PRESETS[preset_key]
+    bps = _preset_bps(preset_key, s)
     output_path = UPLOAD_DIR / f"{job_id}_{preset_key}_out.mp4"
 
     stop_event = asyncio.Event()
@@ -249,7 +262,7 @@ async def run_single(input_path: Path, job_id: str, preset_key: str,
     if custom_cmd and custom_cmd.strip():
         cmd = apply_custom_cmd(custom_cmd, input_path, output_path)
     else:
-        cmd = preset["cmd"](input_path, output_path)
+        cmd = preset["cmd_fn"](input_path, output_path, bps)
     poll_task = asyncio.create_task(poll_during_task(stop_event))
     transcode_result = await asyncio.get_event_loop().run_in_executor(
         None, transcode, cmd
@@ -276,7 +289,7 @@ async def run_single(input_path: Path, job_id: str, preset_key: str,
     return {
         "preset_key": preset_key,
         "preset_label": preset["label"],
-        "preset_detail": preset["detail"],
+        "preset_detail": preset["detail_fn"](bps),
         "transcode": transcode_result,
         "output_size_mb": out_size_mb,
         "energy": {
@@ -359,6 +372,90 @@ def analyse(cpu: dict, gpu: dict) -> dict:
         "finding": finding,
         "confidence_note": confidence_note,
     }
+
+def analyse_all(codecs: dict) -> dict:
+    """Cross-codec summary for all-6 result."""
+    flat = []
+    for codec_name, data in codecs.items():
+        for side in ("cpu", "gpu"):
+            r = data.get(side, {})
+            e = r.get("energy", {})
+            flat.append({
+                "label": r.get("preset_label", ""),
+                "codec": codec_name,
+                "side": side,
+                "delta_e_wh": e.get("delta_e_wh"),
+                "delta_t_s": e.get("delta_t_s"),
+                "output_size_mb": r.get("output_size_mb"),
+                "confidence_flag": e.get("confidence", {}).get("flag"),
+            })
+    valid = [r for r in flat if r["delta_e_wh"] is not None]
+    most_efficient = min(valid, key=lambda r: r["delta_e_wh"]) if valid else None
+    fastest        = min(valid, key=lambda r: r["delta_t_s"])  if valid else None
+    codec_summaries = {
+        codec_name: {
+            "energy_winner":  data["analysis"]["energy_winner"],
+            "speed_winner":   data["analysis"]["speed_winner"],
+            "energy_diff_pct": data["analysis"]["energy_diff_pct"],
+            "speed_diff_pct":  data["analysis"]["speed_diff_pct"],
+        }
+        for codec_name, data in codecs.items() if "analysis" in data
+    }
+    return {
+        "most_efficient": most_efficient,
+        "fastest": fastest,
+        "codec_summaries": codec_summaries,
+    }
+
+
+async def run_all_measurement(input_path: Path, job_id: str, jobs: dict = None) -> dict:
+    """Run all 6 presets (H.264 / H.265 / AV1 × CPU / GPU) in codec pairs."""
+    s = cfg.load()
+    codec_pairs = [
+        ("h264", "cpu",      "gpu"),
+        ("h265", "h265_cpu", "h265_gpu"),
+        ("av1",  "av1_cpu",  "av1_gpu"),
+    ]
+    stopped = focus_mode_enter()
+    LOCK_FILE.write_text(job_id)
+    results = {}
+    try:
+        for idx, (codec_name, cpu_key, gpu_key) in enumerate(codec_pairs):
+            if jobs: jobs[job_id]["stage"] = f"{codec_name}_cpu_baseline"
+            base_cpu = await measure_baseline(polls=s["baseline_polls"])
+            if jobs: jobs[job_id]["stage"] = f"{codec_name}_cpu_encode"
+            cpu_result = await run_single(input_path, job_id, cpu_key, base_cpu)
+
+            if jobs: jobs[job_id]["stage"] = f"{codec_name}_rest"
+            await asyncio.sleep(s["video_cooldown_s"])
+
+            if jobs: jobs[job_id]["stage"] = f"{codec_name}_gpu_baseline"
+            base_gpu = await measure_baseline(polls=s["baseline_polls"])
+            if jobs: jobs[job_id]["stage"] = f"{codec_name}_gpu_encode"
+            gpu_result = await run_single(input_path, job_id, gpu_key, base_gpu)
+
+            results[codec_name] = {
+                "cpu": cpu_result,
+                "gpu": gpu_result,
+                "analysis": analyse(cpu_result, gpu_result),
+            }
+            if idx < len(codec_pairs) - 1:
+                if jobs: jobs[job_id]["stage"] = f"{codec_name}_inter_rest"
+                await asyncio.sleep(s["video_cooldown_s"])
+    finally:
+        LOCK_FILE.unlink(missing_ok=True)
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, focus_mode_exit, stopped)
+
+    if jobs: jobs[job_id]["stage"] = "done"
+    return {
+        "mode": "all_codecs",
+        "job_id": job_id,
+        "codecs": results,
+        "analysis": analyse_all(results),
+        "scope": "Device layer only (GoS1 server). Network, CDN, CPE excluded.",
+    }
+
 
 # --- Main entry points ---
 

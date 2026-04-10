@@ -8,7 +8,7 @@ from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from dotenv import dotenv_values
 from tapo import ApiClient
-from video import run_video_measurement, run_both_measurement, run_video_measurement_path, run_both_measurement_path, UPLOAD_DIR, LOCK_FILE
+from video import run_video_measurement, run_both_measurement, run_all_measurement, run_video_measurement_path, run_both_measurement_path, UPLOAD_DIR, LOCK_FILE
 from sources import get_all_sources, PRELOADED
 from llm import run_llm_measurement, run_llm_batch_measurement, run_llm_both_measurement, MODELS, TASKS
 from persist import save_result, list_results, load_result, to_csv
@@ -450,12 +450,12 @@ async def video_page(request: Request):
     <div class="presets" style="margin-bottom:0.75rem">
         <div class="preset" id="preset-cpu" onclick="selectPreset('cpu')">
             <h3>H.264 CPU</h3>
-            <p class="pspec">libx264 · CRF 23 · 1080p</p>
+            <p class="pspec">libx264 · ABR · 1080p</p>
             <details class="pdesc"><summary>details</summary>Software encode across all 24 cores.</details>
         </div>
         <div class="preset" id="preset-gpu" onclick="selectPreset('gpu')">
             <h3>H.264 GPU</h3>
-            <p class="pspec">h264_vaapi · QP 23 · 1080p · full pipeline</p>
+            <p class="pspec">h264_vaapi · ABR · 1080p · full pipeline</p>
             <details class="pdesc"><summary>details</summary>Hardware decode + encode. Full GPU pipeline — representative of live encoding.</details>
         </div>
         <div class="preset selected" id="preset-both" onclick="selectPreset('both')">
@@ -469,12 +469,12 @@ async def video_page(request: Request):
     <div class="presets" style="margin-bottom:0.75rem">
         <div class="preset" id="preset-h265_cpu" onclick="selectPreset('h265_cpu')">
             <h3>H.265 CPU</h3>
-            <p class="pspec">libx265 · CRF 28 · 1080p</p>
+            <p class="pspec">libx265 · ABR · 1080p</p>
             <details class="pdesc"><summary>details</summary>Software HEVC encode.</details>
         </div>
         <div class="preset" id="preset-h265_gpu" onclick="selectPreset('h265_gpu')">
             <h3>H.265 GPU</h3>
-            <p class="pspec">hevc_vaapi · QP 28 · 1080p · full pipeline</p>
+            <p class="pspec">hevc_vaapi · ABR · 1080p · full pipeline</p>
             <details class="pdesc"><summary>details</summary>Hardware decode + encode. Full GPU pipeline.</details>
         </div>
         <div class="preset" id="preset-h265_both" onclick="selectPreset('h265_both')">
@@ -488,12 +488,12 @@ async def video_page(request: Request):
     <div class="presets" style="margin-bottom:1.5rem">
         <div class="preset" id="preset-av1_cpu" onclick="selectPreset('av1_cpu')">
             <h3>AV1 CPU</h3>
-            <p class="pspec">libsvtav1 · CRF 30 · 1080p</p>
+            <p class="pspec">libsvtav1 · ABR · 1080p</p>
             <details class="pdesc"><summary>details</summary>SVT-AV1 software encode.</details>
         </div>
         <div class="preset" id="preset-av1_gpu" onclick="selectPreset('av1_gpu')">
             <h3>AV1 GPU</h3>
-            <p class="pspec">av1_vaapi · QP 28 · 1080p · full pipeline</p>
+            <p class="pspec">av1_vaapi · ABR · 1080p · full pipeline</p>
             <details class="pdesc"><summary>details</summary>Hardware decode + AV1 encode. RDNA3 AV1 engine.</details>
         </div>
         <div class="preset" id="preset-av1_both" onclick="selectPreset('av1_both')">
@@ -501,6 +501,17 @@ async def video_page(request: Request):
             <p class="pspec">CPU then GPU · same file</p>
             <details class="pdesc"><summary>details</summary>Side-by-side AV1 CPU vs GPU comparison.</details>
         </div>
+    </div>
+
+    <div style="border:1px solid #00ff9933;padding:0.9rem 1rem;margin-bottom:1.5rem;
+                display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem"
+         id="preset-all_codecs" onclick="selectPreset('all_codecs')"
+         style="cursor:pointer">
+        <div>
+            <div style="color:#00ff99;font-size:0.9rem;font-weight:bold">Compare all codecs</div>
+            <div style="color:#555;font-size:0.75rem;margin-top:0.2rem">H.264 · H.265 · AV1 · CPU + GPU · same source · same target bitrate — full matrix</div>
+        </div>
+        <div style="color:#444;font-size:0.75rem">~6× longer · locks queue</div>
     </div>
 
     <div style="margin-bottom:1.5rem">
@@ -574,8 +585,8 @@ async def video_page(request: Request):
             src === 'upload' ? 'Upload & Measure' : 'Run Measurement';
     }}
 
-    function _cmdBox(id, value) {{
-        if (IS_LAN) {{
+    function _cmdBox(id, value, forceReadonly=false) {{
+        if (IS_LAN && !forceReadonly) {{
             return '<textarea id="' + id + '" rows="3" spellcheck="false" '
                 + 'style="width:100%;background:#0d0d0d;border:1px solid #2a2a2a;'
                 + 'color:#aaa;font-family:monospace;font-size:0.72rem;'
@@ -594,12 +605,19 @@ async def video_page(request: Request):
         try {{
             const resp = await fetch('/video/preview-cmd?preset=' + preset);
             const data = await resp.json();
-            if (data.mode === 'both') {{
+            if (data.mode === 'all_codecs') {{
+                customCmds = {{}};
+                const labels = {{cpu:'H.264 CPU',gpu:'H.264 GPU',h265_cpu:'H.265 CPU',h265_gpu:'H.265 GPU',av1_cpu:'AV1 CPU',av1_gpu:'AV1 GPU'}};
+                box.innerHTML = Object.entries(data.cmds).map(([k,v]) =>
+                    '<div style="color:#444;font-size:0.7rem;margin:0.4rem 0 0.2rem">' + (labels[k]||k) + '</div>'
+                    + _cmdBox('cmd_'+k, v, true)
+                ).join('');
+            }} else if (data.mode === 'both') {{
                 customCmds = {{cpu: data.cpu_cmd, gpu: data.gpu_cmd}};
                 box.innerHTML =
-                    '<div style="color:#444;font-size:0.7rem;margin-bottom:0.3rem">CPU (H.264)</div>'
+                    '<div style="color:#444;font-size:0.7rem;margin-bottom:0.3rem">CPU</div>'
                     + _cmdBox('cmd_cpu', data.cpu_cmd)
-                    + '<div style="color:#444;font-size:0.7rem;margin:0.5rem 0 0.3rem">GPU (H.264)</div>'
+                    + '<div style="color:#444;font-size:0.7rem;margin:0.5rem 0 0.3rem">GPU</div>'
                     + _cmdBox('cmd_gpu', data.gpu_cmd);
             }} else {{
                 customCmds = {{single: data.cmd}};
@@ -635,35 +653,57 @@ async def video_page(request: Request):
     const _BOTH_STAGES = ['Baseline', 'CPU encode', 'Rest', 'Baseline 2', 'GPU encode', 'Done'];
     const _BOTH_MAP = {{'starting':0, 'baseline':0, 'cpu_encode':1, 'rest':2,
                         'baseline_2':3, 'gpu_encode':4, 'done':5}};
+    const _ALL_STAGES = ['H.264 CPU','Rest','H.264 GPU','Rest','H.265 CPU','Rest','H.265 GPU','Rest','AV1 CPU','Rest','AV1 GPU','Done'];
+    const _ALL_MAP = {{'starting':0,
+        'h264_cpu_baseline':0,'h264_cpu_encode':0,
+        'h264_rest':1,
+        'h264_gpu_baseline':2,'h264_gpu_encode':2,
+        'h264_inter_rest':3,
+        'h265_cpu_baseline':4,'h265_cpu_encode':4,
+        'h265_rest':5,
+        'h265_gpu_baseline':6,'h265_gpu_encode':6,
+        'h265_inter_rest':7,
+        'av1_cpu_baseline':8,'av1_cpu_encode':8,
+        'av1_rest':9,
+        'av1_gpu_baseline':10,'av1_gpu_encode':10,
+        'done':11}};
     const STAGES = {{
-        cpu:       _SINGLE,
-        gpu:       _SINGLE,
-        h265_cpu:  _SINGLE,
-        h265_gpu:  _SINGLE,
-        av1_cpu:   _SINGLE,
-        av1_gpu:   _SINGLE,
-        both:      _BOTH_STAGES,
-        h265_both: _BOTH_STAGES,
-        av1_both:  _BOTH_STAGES,
+        cpu:        _SINGLE,
+        gpu:        _SINGLE,
+        h265_cpu:   _SINGLE,
+        h265_gpu:   _SINGLE,
+        av1_cpu:    _SINGLE,
+        av1_gpu:    _SINGLE,
+        both:       _BOTH_STAGES,
+        h265_both:  _BOTH_STAGES,
+        av1_both:   _BOTH_STAGES,
+        all_codecs: _ALL_STAGES,
     }};
 
     const STAGE_MAP = {{
-        cpu:       _SINGLE_MAP,
-        gpu:       _SINGLE_MAP,
-        h265_cpu:  _SINGLE_MAP,
-        h265_gpu:  _SINGLE_MAP,
-        av1_cpu:   _SINGLE_MAP,
-        av1_gpu:   _SINGLE_MAP,
-        both:      _BOTH_MAP,
-        h265_both: _BOTH_MAP,
-        av1_both:  _BOTH_MAP,
+        cpu:        _SINGLE_MAP,
+        gpu:        _SINGLE_MAP,
+        h265_cpu:   _SINGLE_MAP,
+        h265_gpu:   _SINGLE_MAP,
+        av1_cpu:    _SINGLE_MAP,
+        av1_gpu:    _SINGLE_MAP,
+        both:       _BOTH_MAP,
+        h265_both:  _BOTH_MAP,
+        av1_both:   _BOTH_MAP,
+        all_codecs: _ALL_MAP,
     }};
 
     function selectPreset(key) {{
         selectedPreset = key;
         document.querySelectorAll('.preset').forEach(el => el.classList.remove('selected'));
+        // also reset all_codecs highlight
+        const allEl = document.getElementById('preset-all_codecs');
+        if (allEl) allEl.style.borderColor = '#00ff9933';
         const el = document.getElementById('preset-' + key);
-        if (el) el.classList.add('selected');
+        if (el) {{
+            el.classList.add('selected');
+            if (key === 'all_codecs') el.style.borderColor = '#00ff99';
+        }}
         fetchCmdPreview(key);
     }}
 
@@ -872,6 +912,94 @@ async def video_page(request: Request):
         </div>`;
     }}
 
+    function renderAllCodecs(r) {{
+        const codecs = r.codecs;
+        const a = r.analysis;
+        const codecOrder = [['h264','H.264'],['h265','H.265'],['av1','AV1']];
+        const fmt = v => v != null ? v : '—';
+
+        // Summary matrix table
+        let tableRows = codecOrder.map(([key, label]) => {{
+            const cd = codecs[key];
+            if (!cd) return '';
+            const ce = cd.cpu.energy, ge = cd.gpu.energy;
+            const ca = cd.analysis;
+            const ew = ca.energy_winner, sw = ca.speed_winner;
+            const cpuWin = (ew==='CPU'?'✓':'') + (sw==='CPU'?' 🏁':'');
+            const gpuWin = (ew==='GPU'?'✓':'') + (sw==='GPU'?' 🏁':'');
+            return `<tr>
+                <td style="color:#e0e0e0;font-weight:bold">${{label}}</td>
+                <td>${{fmt(ce.delta_t_s)}}s</td>
+                <td style="color:${{ew==='CPU'?'#00ff99':'#888'}}">${{fmt(ce.delta_e_wh)}} Wh ${{cpuWin}}</td>
+                <td>${{fmt(ge.delta_t_s)}}s</td>
+                <td style="color:${{ew==='GPU'?'#00ff99':'#888'}}">${{fmt(ge.delta_e_wh)}} Wh ${{gpuWin}}</td>
+                <td style="color:#555;font-size:0.75rem">${{fmt(cd.cpu.output_size_mb)}} MB</td>
+                <td style="font-size:0.78rem">${{ce.confidence.flag}} ${{ge.confidence.flag}}</td>
+            </tr>`;
+        }}).join('');
+
+        const bestE = a.most_efficient;
+        const bestS = a.fastest;
+        const highlights = `
+            <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:0.75rem;font-size:0.82rem">
+                <span>⚡ Most efficient: <span style="color:#00ff99">${{bestE ? bestE.label + ' (' + bestE.delta_e_wh + ' Wh)' : '—'}}</span></span>
+                <span>🏁 Fastest: <span style="color:#00ff99">${{bestS ? bestS.label + ' (' + bestS.delta_t_s + 's)' : '—'}}</span></span>
+            </div>`;
+
+        // Per-codec collapsible detail
+        const details = codecOrder.map(([key, label]) => {{
+            const cd = codecs[key];
+            if (!cd) return '';
+            function miniCol(res, tag) {{
+                const e = res.energy, t = res.thermals;
+                return `<div style="flex:1;min-width:180px">
+                    <div style="color:#888;font-size:0.72rem;margin-bottom:0.4rem">${{tag}}</div>
+                    ${{metricRow('Duration', e.delta_t_s, 's')}}
+                    ${{metricRow('Output size', res.output_size_mb, 'MB')}}
+                    ${{metricRow('Baseline', e.w_base, 'W')}}
+                    ${{metricRow('ΔW', e.delta_w, 'W')}}
+                    ${{metricRow('ΔE', e.delta_e_wh, 'Wh')}}
+                    ${{metricRow('Polls', e.poll_count)}}
+                    ${{metricRow('CPU peak', t.cpu_peak, '°C')}}
+                    ${{metricRow('GPU peak', t.gpu_peak, '°C')}}
+                    <div style="margin-top:0.5rem;font-size:0.78rem">${{e.confidence.flag}} ${{e.confidence.label}}</div>
+                    ${{e.confidence.hint ? '<div style="color:#888;font-size:0.7rem;margin-top:0.2rem">' + e.confidence.hint + '</div>' : ''}}
+                </div>`;
+            }}
+            return `<details style="margin-top:0.5rem;border:1px solid #1a1a1a;padding:0.75rem">
+                <summary style="color:#888;font-size:0.8rem;cursor:pointer;list-style:none">
+                    <span style="color:#00ff99">${{label}}</span> — ${{cd.analysis.finding.slice(0,80)}}…
+                </summary>
+                <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:0.75rem">
+                    ${{miniCol(cd.cpu, cd.cpu.preset_label)}}
+                    ${{miniCol(cd.gpu, cd.gpu.preset_label)}}
+                </div>
+            </details>`;
+        }}).join('');
+
+        return `
+        <div class="report">
+            <h2>All Codecs — Energy &amp; Speed Matrix</h2>
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:0.5rem">
+                <thead><tr style="color:#444;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em">
+                    <th style="text-align:left;padding:0.3rem 0.5rem 0.5rem 0">Codec</th>
+                    <th style="text-align:right;padding:0.3rem 0.5rem">CPU time</th>
+                    <th style="text-align:right;padding:0.3rem 0.5rem">CPU energy</th>
+                    <th style="text-align:right;padding:0.3rem 0.5rem">GPU time</th>
+                    <th style="text-align:right;padding:0.3rem 0.5rem">GPU energy</th>
+                    <th style="text-align:right;padding:0.3rem 0.5rem">Output</th>
+                    <th style="text-align:center;padding:0.3rem 0.5rem">Conf</th>
+                </tr></thead>
+                <tbody style="font-family:monospace">${{tableRows}}</tbody>
+            </table>
+            <div style="font-size:0.7rem;color:#333;margin-bottom:0.25rem">✓ energy winner · 🏁 speed winner · Output = CPU encode size (same target bitrate)</div>
+            ${{highlights}}
+            <div style="margin-top:1rem;color:#555;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Per-codec detail</div>
+            ${{details}}
+            <div class="scope-note">${{r.scope}}</div>
+        </div>`;
+    }}
+
     function downloadLinks(jobId) {{
         const base = '/results/video/' + jobId;
         return `<div style="margin-top:1rem;display:flex;gap:0.75rem">
@@ -893,6 +1021,8 @@ async def video_page(request: Request):
         let html;
         if (r.mode === 'both') {{
             html = renderBoth(r) + links;
+        }} else if (r.mode === 'all_codecs') {{
+            html = renderAllCodecs(r) + links;
         }} else {{
             html = renderSingle(r.result) + links;
         }}
@@ -920,6 +1050,9 @@ async def video_page(request: Request):
             if (r.mode === 'both') {{
                 codec = [r.cpu_preset, r.gpu_preset].filter(Boolean).join(' vs ');
                 summary = `CPU ${{r.cpu_delta_e_wh}} Wh ${{r.cpu_confidence||''}} · GPU ${{r.gpu_delta_e_wh}} Wh ${{r.gpu_confidence||''}}`;
+            }} else if (r.mode === 'all_codecs') {{
+                codec = 'H.264 · H.265 · AV1 — all codecs';
+                summary = `Best: ${{r.most_efficient||'—'}} (${{r.best_delta_e_wh||'—'}} Wh) · Fastest: ${{r.fastest||'—'}} ${{r.all_green ? '🟢' : ''}}`;
             }} else {{
                 codec = r.preset || '';
                 summary = `${{r.delta_e_wh}} Wh ${{r.confidence||''}}`;
@@ -966,7 +1099,9 @@ async def run_job(job_id: str, input_path: Path, preset: str, delete_after: bool
             "h265_both": ("h265_cpu", "h265_gpu"),
             "av1_both":  ("av1_cpu",  "av1_gpu"),
         }
-        if preset in _BOTH_PRESETS:
+        if preset == "all_codecs":
+            result = await run_all_measurement(input_path, job_id, jobs)
+        elif preset in _BOTH_PRESETS:
             p_cpu, p_gpu = _BOTH_PRESETS[preset]
             result = await run_both_measurement(input_path, job_id, jobs,
                                                 custom_cmd_cpu=custom_cmd_cpu,
@@ -992,7 +1127,7 @@ async def use_preloaded_source(
     custom_cmd_cpu: str = Form(None),
     custom_cmd_gpu: str = Form(None),
 ):
-    if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "h265_both", "av1_cpu", "av1_gpu", "av1_both"):
+    if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "h265_both", "av1_cpu", "av1_gpu", "av1_both", "all_codecs"):
         return JSONResponse({"error": "Invalid preset"}, status_code=400)
 
     source = PRELOADED.get(source_key)
@@ -1021,7 +1156,7 @@ async def upload_video(
     custom_cmd_cpu: str = Form(None),
     custom_cmd_gpu: str = Form(None),
 ):
-    if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "h265_both", "av1_cpu", "av1_gpu", "av1_both"):
+    if preset not in ("cpu", "gpu", "both", "h265_cpu", "h265_gpu", "h265_both", "av1_cpu", "av1_gpu", "av1_both", "all_codecs"):
         return JSONResponse({"error": "Invalid preset"}, status_code=400)
 
     allowed = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".ts"}
@@ -1061,7 +1196,14 @@ async def video_preview_cmd(preset: str = "both"):
     placeholder_in = Path("{input}")
     placeholder_out = Path("{output}")
     _BOTH_MAP = {"both": ("cpu","gpu"), "h265_both": ("h265_cpu","h265_gpu"), "av1_both": ("av1_cpu","av1_gpu")}
-    if preset in _BOTH_MAP:
+    if preset == "all_codecs":
+        pairs = [("cpu","gpu"),("h265_cpu","h265_gpu"),("av1_cpu","av1_gpu")]
+        cmds = {}
+        for cpu_k, gpu_k in pairs:
+            cmds[cpu_k] = " ".join(build_preset_cmd(cpu_k, placeholder_in, placeholder_out))
+            cmds[gpu_k] = " ".join(build_preset_cmd(gpu_k, placeholder_in, placeholder_out))
+        return {"mode": "all_codecs", "cmds": cmds}
+    elif preset in _BOTH_MAP:
         p_cpu, p_gpu = _BOTH_MAP[preset]
         cpu_cmd = " ".join(build_preset_cmd(p_cpu, placeholder_in, placeholder_out))
         gpu_cmd = " ".join(build_preset_cmd(p_gpu, placeholder_in, placeholder_out))
@@ -2692,6 +2834,14 @@ async def settings_page(request: Request):
     {field("llm_rest_s",        s['llm_rest_s'],        5,  120, "s",      "pause between runs in batch mode")}
     {field("llm_unload_settle_s", s['llm_unload_settle_s'], 1, 30, "s",   "wait after model unload before baseline")}
 
+    <div class="section">Encoding targets</div>
+    <div style="color:#444;font-size:0.75rem;line-height:1.6;margin-bottom:0.75rem">
+      ABR target bitrate applied to both CPU and GPU presets for each codec — ensures apples-to-apples energy comparison. Custom ffmpeg commands on the video page override these.
+    </div>
+    {field("h264_bitrate_kbps", s['h264_bitrate_kbps'], 500, 20000, "kbps", "H.264 target bitrate (libx264 + h264_vaapi)", step=100)}
+    {field("h265_bitrate_kbps", s['h265_bitrate_kbps'], 500, 20000, "kbps", "H.265 target bitrate (libx265 + hevc_vaapi)", step=100)}
+    {field("av1_bitrate_kbps",  s['av1_bitrate_kbps'],  500, 20000, "kbps", "AV1 target bitrate (libsvtav1 + av1_vaapi)", step=100)}
+
     <div class="section">Confidence thresholds</div>
     {calib_field("variance_idle_pct", s['variance_idle_pct'], "CV of raw idle P110 readings — set by calibration")}
     {calib_field("variance_cpu_pct",  s['variance_cpu_pct'],  "CV of ΔW across H264-CPU runs — set by calibration")}
@@ -2718,6 +2868,7 @@ async def settings_page(request: Request):
     <script>
     async function saveSettings() {{
         const num_fields = ['baseline_polls','video_cooldown_s','llm_rest_s','llm_unload_settle_s',
+                            'h264_bitrate_kbps','h265_bitrate_kbps','av1_bitrate_kbps',
                             'variance_pct','variance_green_x','variance_yellow_x',
                             'conf_green_polls','conf_yellow_polls',
                             'variance_runs','variance_cooldown_s'];

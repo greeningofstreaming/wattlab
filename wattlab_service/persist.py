@@ -122,6 +122,19 @@ def _summarise(job_type: str, data: dict) -> dict:
             summary["gpu_duration_s"] = gpu_e.get("delta_t_s")
             summary["cpu_confidence"] = cpu_e.get("confidence", {}).get("flag")
             summary["gpu_confidence"] = gpu_e.get("confidence", {}).get("flag")
+        elif mode == "all_codecs":
+            a = data.get("analysis", {})
+            best = a.get("most_efficient")
+            summary["most_efficient"] = best["label"] if best else None
+            summary["best_delta_e_wh"] = best["delta_e_wh"] if best else None
+            fastest = a.get("fastest")
+            summary["fastest"] = fastest["label"] if fastest else None
+            # flag if all green
+            codecs = data.get("codecs", {})
+            flags = [data["codecs"][c][s]["energy"].get("confidence", {}).get("flag")
+                     for c in codecs for s in ("cpu", "gpu")
+                     if c in codecs and s in codecs[c]]
+            summary["all_green"] = all(f == "🟢" for f in flags if f)
         else:
             result = data.get("result", {})
             e = result.get("energy", {})
@@ -219,6 +232,13 @@ def _video_rows(data: dict) -> list:
     if mode == "both":
         return [_video_result_row(common, data["cpu"]),
                 _video_result_row(common, data["gpu"])]
+    elif mode == "all_codecs":
+        rows = []
+        for codec_name, codec_data in data.get("codecs", {}).items():
+            for side in ("cpu", "gpu"):
+                if side in codec_data:
+                    rows.append(_video_result_row(common, codec_data[side]))
+        return rows
     else:
         return [_video_result_row(common, data.get("result", {}))]
 

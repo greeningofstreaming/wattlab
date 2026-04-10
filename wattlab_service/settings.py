@@ -33,6 +33,10 @@ DEFAULTS = {
         " -vf scale_vaapi=w=-2:h=1080:format=nv12"
         " -c:v hevc_vaapi -qp 28 -c:a aac -b:a 128k {output}"
     ),
+    # Encoding targets — ABR bitrate per codec (applied to both CPU and GPU presets)
+    "h264_bitrate_kbps": 4000,
+    "h265_bitrate_kbps": 2000,
+    "av1_bitrate_kbps":  1500,
     "rag_corpus_path": "/home/gos/wattlab/corpus/papers",
     "rag_chroma_path": "/home/gos/wattlab/.chroma",
 }
