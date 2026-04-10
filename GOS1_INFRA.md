@@ -69,7 +69,7 @@ Location: `nextcloud:GoS1-backup/`
 - Root-owned /etc files fail with permission denied under gos user — expected
 
 **TODO:**
-- [ ] Cron job for recurring backup
+- [x] Cron job for recurring backup — `/etc/cron.d/wattlab-results-backup`, runs 03:30 daily, syncs `results/` to `nextcloud:GoS1-backup/wattlab-results/`, logs to `/var/log/wattlab-backup.log`
 - [ ] Consider `rclone crypt` overlay for encryption before upload
 - [ ] Replace raw /etc folder with selective tarball of key configs
 
