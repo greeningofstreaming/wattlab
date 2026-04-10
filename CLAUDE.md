@@ -80,7 +80,8 @@ wattlab/
     ├── image_gen.py              # SD-Turbo CPU diffusion + P110 measurement
     ├── persist.py                # Flat-file result storage + CSV/JSON export
     ├── settings.py               # Lab config (15 params, settings.json)
-    └── sources.py                # Pre-loaded test content registry
+    ├── sources.py                # Pre-loaded test content registry
+    └── power.py                  # Power measurement interface (Tapo P110); swap here for PDU/IPMI
 ```
 
 ## Measurement Protocol

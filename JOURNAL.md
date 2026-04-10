@@ -67,6 +67,28 @@ Notable observations:
 - DNS + SSL: **closed** — done this session
 - Added: Benchmark 2 (representative real-world CRF/QP presets), main.py refactor, Docker containerisation
 
+#### Cron jobs
+Two cron jobs added to `/etc/cron.d/`:
+
+**wattlab-tmp-cleanup** — daily at 03:00, removes transcode output files older than 180 minutes from `/tmp/wattlab_uploads/`. The age filter ensures no in-flight or queued job input files are touched. (4.2 GB had accumulated at time of writing.)
+```
+0 3 * * * gos find /tmp/wattlab_uploads -type f -mmin +180 -delete
+```
+
+**wattlab-results-backup** — daily at 03:30, rsyncs `results/` to Nextcloud (`GoS1-backup/wattlab-results/`). Results are gitignored and were previously unbacked — this is the only copy outside GoS1. Logs to `/var/log/wattlab-backup.log`.
+```
+30 3 * * * gos /usr/bin/rclone sync /home/gos/wattlab/results/ nextcloud:GoS1-backup/wattlab-results/ --log-file=/var/log/wattlab-backup.log 2>&1
+```
+
+#### power.py — pluggable power measurement module
+`get_power_watts()` was duplicated identically in all five files: `video.py`, `llm.py`, `image_gen.py`, `rag.py`, `main.py` (the comment in llm.py even said "same as video.py"). Extracted into a new `wattlab_service/power.py` module.
+
+All five files now import `from power import get_power_watts`. The `tapo` and `dotenv_values` imports were removed from the four measurement modules entirely; `main.py` retains `dotenv_values` for the gate password.
+
+`power.py` includes an explicit comment marking the swap point for future PDU/IPMI/alternative sources — the only file that needs changing for a DC deployment.
+
+Net result: −89 lines across the codebase.
+
 ### Deferred (carried forward)
 - Image page elapsed time in progress bar
 - GPU image generation: first clean measurement run
