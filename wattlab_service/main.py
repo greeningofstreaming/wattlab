@@ -37,6 +37,7 @@ async def gate_page(next: str = "/", error: bool = False):
     return f"""<!DOCTYPE html>
 <html>
 <head>
+  <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
   <title>WattLab</title>
   <style>
     *{{box-sizing:border-box;margin:0;padding:0}}
@@ -269,7 +270,8 @@ async def index():
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>WattLab — GoS</title>
+    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+  <title>WattLab — GoS</title>
     <meta http-equiv="refresh" content="10">
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -345,7 +347,8 @@ async def video_page(request: Request):
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>WattLab — Video Test</title>
+    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+  <title>WattLab — Video Test</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{ font-family: monospace; background: #0a0a0a; color: #e0e0e0;
@@ -1277,7 +1280,8 @@ async def llm_page():
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>WattLab — LLM Inference Test</title>
+    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+  <title>WattLab — LLM Inference Test</title>
     <style>
         * {{ box-sizing:border-box; margin:0; padding:0; }}
         body {{ font-family:monospace; background:#0a0a0a; color:#e0e0e0;
@@ -2061,7 +2065,8 @@ async def rag_page():
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>WattLab — RAG Energy Test</title>
+    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+  <title>WattLab — RAG Energy Test</title>
     <style>
         * {{ box-sizing:border-box; margin:0; padding:0; }}
         body {{ font-family:monospace; background:#0a0a0a; color:#e0e0e0;
@@ -2797,7 +2802,8 @@ async def settings_page(request: Request):
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>WattLab — Settings</title>
+    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+  <title>WattLab — Settings</title>
     <style>
         * {{ box-sizing:border-box; margin:0; padding:0; }}
         body {{ font-family:monospace; background:#0a0a0a; color:#e0e0e0;
@@ -2934,6 +2940,7 @@ async def settings_save(request: Request, data: dict):
 _DEMO_HTML = f"""<!DOCTYPE html>
 <html>
 <head>
+<link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
 <title>WattLab — Guided Tour · Greening of Streaming</title>
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
@@ -4156,7 +4163,8 @@ async def image_page():
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>WattLab — Image Generation Test</title>
+    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+  <title>WattLab — Image Generation Test</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{ font-family: monospace; background: #0a0a0a; color: #e0e0e0;
@@ -4442,7 +4450,8 @@ async def queue_page():
     return """<!DOCTYPE html>
 <html>
 <head>
-    <title>WattLab — Queue</title>
+    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+  <title>WattLab — Queue</title>
     <meta http-equiv="refresh" content="4">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -4521,6 +4530,7 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
 <title>WattLab — Methodology</title>
 <style>
   :root {
