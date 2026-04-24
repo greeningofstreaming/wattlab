@@ -280,6 +280,8 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [ ] main.py refactor: split into routes/, Jinja templates, typed models, tests. Raised in session 8 external audit. Valid technical debt; deferred until post-demo.
 - [ ] Dockerize WattLab service — isolate from future GoS1 projects. Stage 1: FastAPI + VAAPI (`--device /dev/dri`), `--network host`, drop or proxy focus mode via thin host helper socket service. Stage 2 (later, if portability needed): full ROCm image for GPU image gen. Ollama stays as host systemd service, accessed over host network. See conversation 2026-04-10 for full analysis.
 - [ ] Power-user/visitor UX: progressive-disclosure pilot applied to all test pages in session 14; watch to see if collapsed `ⓘ About this test` + `/demo` link suffices, or if a visible density toggle is needed later.
+- [ ] Owl logo missing from `/queue-status` and `/methodology`. `/queue-status` has its own inline `← Home` link rather than using `{_BACK}` (see `main.py:~4865`) — swap for `_BACK` or inline an equivalent owl+wordmark. `/methodology` has its own topbar with the GoS logo + Home link (`main.py:~5079`) — add the owl alongside the GoS mark so the project + org branding is consistent with every other page.
+- [ ] Guided Tour final-findings step: reorder so **video processing** leads (that's the GoS raison d'être), with **LLM / Image Generation / RAG** findings demoted to collapsible `<details>` blocks below. Current layout weights them equally which buries the core story. Find the summary step in `/demo` (probably the last `step-N` block) and restructure — the existing `<details>` pattern used on test pages can be reused here.
 
 ## Key Findings to Date
 
