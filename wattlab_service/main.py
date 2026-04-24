@@ -12,7 +12,9 @@ from video import run_video_measurement, run_both_measurement, run_all_measureme
 from sources import get_all_sources, PRELOADED
 from llm import run_llm_measurement, run_llm_batch_measurement, run_llm_both_measurement, MODELS, TASKS
 from persist import save_result, list_results, load_result, to_csv
-from image_gen import run_image_measurement, run_image_both_measurement, IMAGE_STEPS_CPU, IMAGE_STEPS_GPU, GPU_BATCH_SIZE
+from image_gen import (run_image_measurement, run_image_both_measurement,
+                        run_image_compare_models_measurement, IMAGE_MODELS,
+                        IMAGE_STEPS_CPU, IMAGE_STEPS_GPU, GPU_BATCH_SIZE)
 import rag as rag_module
 import settings as cfg
 
@@ -428,11 +430,23 @@ async def video_page(request: Request):
     <h1>Video Transcode Energy Test</h1>
     <div class="subtitle">Greening of Streaming · WattLab · GoS1</div>
 
-    <div class="info">
-        Accepted: MP4, MOV, MKV, AVI, WebM, TS · Max 1GB<br>
-        Baseline measured 10s before each run · P110 + thermals at 1s intervals<br>
-        Scope: device layer only — network, CDN, CPE excluded
+    <div style="margin-bottom:1rem;font-size:0.78rem;color:#555">
+        First time here? <a href="/demo" style="color:#00ff99;text-decoration:none">Try the Guided Tour →</a>
     </div>
+
+    <details style="margin-bottom:1.5rem;border-left:2px solid #222;padding-left:1rem">
+        <summary style="cursor:pointer;color:#888;font-size:0.82rem;list-style:none;outline:none">
+            ⓘ About this test <span style="color:#444;font-size:0.72rem">(click to expand)</span>
+        </summary>
+        <div style="color:#777;font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
+            Transcode a source video and measure the server's wall-power draw during the encode.<br>
+            Accepted: MP4, MOV, MKV, AVI, WebM, TS · Max 1GB.<br>
+            Baseline measured 10s before each run · P110 + thermals at 1s intervals.<br>
+            All GPU presets use the full VAAPI pipeline (hardware decode + encode + scale) — representative of live encoding workflows.<br>
+            Rate control is ABR (constant bitrate target) across all 6 presets so CPU and GPU receive identical tasks.<br>
+            Scope: device layer only — network, CDN, and client devices (CPE) excluded.
+        </div>
+    </details>
 
     <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
                 letter-spacing:0.05em;margin-bottom:0.5rem">H.264</div>
@@ -1331,11 +1345,23 @@ async def llm_page():
     {_BACK}
     <h1>LLM Inference Energy Test</h1>
     <div class="subtitle">Greening of Streaming · WattLab · GoS1</div>
-    <div class="info">
-        Fixed prompts for comparability · P110 at 1s intervals<br>
-        Energy per token (mWh/token) is the primary metric<br>
-        Scope: device layer only — no amortised training cost included
+
+    <div style="margin-bottom:1rem;font-size:0.78rem;color:#555">
+        First time here? <a href="/demo" style="color:#00ff99;text-decoration:none">Try the Guided Tour →</a>
     </div>
+
+    <details style="margin-bottom:1.5rem;border-left:2px solid #222;padding-left:1rem">
+        <summary style="cursor:pointer;color:#888;font-size:0.82rem;list-style:none;outline:none">
+            ⓘ About this test <span style="color:#444;font-size:0.72rem">(click to expand)</span>
+        </summary>
+        <div style="color:#777;font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
+            Run a language model on a fixed prompt and measure energy per token.<br>
+            Models span small → large: TinyLlama 1.1B · Mistral 7B · Gemma 3 12B. CPU + ROCm GPU (via Ollama).<br>
+            Cold mode unloads the model first; warm mode reuses a loaded model. Batch mode runs N inferences with a rest between.<br>
+            Primary metric: <strong style="color:#aaa">mWh per output token</strong> · P110 polled at 1s intervals.<br>
+            Scope: device layer only — no amortised training cost included.
+        </div>
+    </details>
 
     <div class="section-label">Model</div>
     <div class="presets">{models_html}</div>
@@ -2123,11 +2149,22 @@ async def rag_page():
     {busy_banner}
     <h1>RAG Energy Test</h1>
     <div class="subtitle">Greening of Streaming · WattLab · GoS1</div>
-    <div class="info">
-        Retrieval-Augmented Generation (RAG) augments an LLM with chunks from a PDF corpus.<br>
-        Compare baseline (no retrieval), RAG (top 3 chunks), and RAG-large (top 8 chunks).<br>
-        Scope: device layer only — no network, no amortised training cost.
+
+    <div style="margin-bottom:1rem;font-size:0.78rem;color:#555">
+        First time here? <a href="/demo" style="color:#00ff99;text-decoration:none">Try the Guided Tour →</a>
     </div>
+
+    <details style="margin-bottom:1.5rem;border-left:2px solid #222;padding-left:1rem">
+        <summary style="cursor:pointer;color:#888;font-size:0.82rem;list-style:none;outline:none">
+            ⓘ About this test <span style="color:#444;font-size:0.72rem">(click to expand)</span>
+        </summary>
+        <div style="color:#777;font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
+            Retrieval-Augmented Generation (RAG) augments an LLM with chunks retrieved from a PDF corpus (ChromaDB + sentence-transformer embeddings).<br>
+            Compare three modes: <strong style="color:#aaa">baseline</strong> (no retrieval), <strong style="color:#aaa">RAG</strong> (top 3 chunks, 4096 ctx), <strong style="color:#aaa">RAG Large</strong> (top 8 chunks, 8192 ctx).<br>
+            Use "Compare 3 modes" to run all three sequentially with fresh baselines — a side-by-side energy comparison for the same question.<br>
+            Scope: device layer only — no network, no amortised training cost.
+        </div>
+    </details>
 
     <div class="index-bar">
         <div style="display:flex;align-items:center;gap:0.6rem">
@@ -4132,10 +4169,33 @@ async def image_page():
                             f'{conf.get("flag","")} {conf.get("label","")} &nbsp;·&nbsp; '
                             f'{s.get("delta_e_wh","?")} Wh &nbsp;·&nbsp; {s.get("delta_t_s","?")}s'
                             f'</span></div>')
+                model_lbl = r.get("model_label") or ""
+                model_tag = f' &nbsp;·&nbsp; {model_lbl}' if model_lbl else ""
                 prev_html += f"""<div class="prev-item" style="flex-direction:column;align-items:flex-start">
-                  <span class="prev-meta">{date_str} &nbsp;·&nbsp; CPU vs GPU</span>
+                  <span class="prev-meta">{date_str} &nbsp;·&nbsp; CPU vs GPU{model_tag}</span>
                   {_side_html("CPU", r.get("cpu", {}))}
                   {_side_html("GPU", r.get("gpu", {}))}
+                  <div class="prev-prompt" style="color:#555;font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
+                  <div style="margin-top:0.3rem">{downloads}</div>
+                </div>"""
+            elif mode == "compare_models":
+                def _mdl_html(s):
+                    img = (f'<img src="data:image/png;base64,{s["b64_png"]}" '
+                           f'style="width:64px;height:64px;object-fit:cover;margin-right:0.5rem">'
+                           if s.get("b64_png") else "")
+                    conf = s.get("confidence", {})
+                    lbl = s.get("model_label", "?")
+                    px = s.get("size_px", "?")
+                    return (f'<div style="display:flex;align-items:center;margin-top:0.4rem">'
+                            f'{img}<span style="color:#555;font-size:0.78rem">'
+                            f'<span style="color:#aaa">{lbl} ({px}px)</span> &nbsp;·&nbsp; '
+                            f'{conf.get("flag","")} {conf.get("label","")} &nbsp;·&nbsp; '
+                            f'{s.get("wh_per_image","?")} Wh/img &nbsp;·&nbsp; {s.get("delta_t_s","?")}s'
+                            f'</span></div>')
+                prev_html += f"""<div class="prev-item" style="flex-direction:column;align-items:flex-start">
+                  <span class="prev-meta">{date_str} &nbsp;·&nbsp; Compare models (GPU)</span>
+                  {_mdl_html(r.get("small", {}))}
+                  {_mdl_html(r.get("large", {}))}
                   <div class="prev-prompt" style="color:#555;font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
                   <div style="margin-top:0.3rem">{downloads}</div>
                 </div>"""
@@ -4213,12 +4273,38 @@ async def image_page():
     {_BACK}
     {busy_banner}
     <h1>Image Generation Test</h1>
-    <div class="subtitle">SD-Turbo · CPU {IMAGE_STEPS_CPU} steps / GPU {IMAGE_STEPS_GPU} steps × {GPU_BATCH_SIZE} images · 512×512</div>
-    <div class="info">
-        Measures the wall-power cost of generating one AI image from text.<br>
-        CPU: {IMAGE_STEPS_CPU} steps (~12s). GPU: batch of {GPU_BATCH_SIZE} images × {IMAGE_STEPS_GPU} steps (~10s total) → energy per image = total/{GPU_BATCH_SIZE}.<br>
-        Each run appends a random colour/mood modifier — live proof the image is generated, not replayed.<br>
-        Model: <code>stabilityai/sd-turbo</code> · GPU backend: ROCm (<code>HSA_OVERRIDE_GFX_VERSION=11.0.0</code>)
+    <div class="subtitle">SD-Turbo (~1B) · SDXL-Turbo (~3.5B) · 512×512 · ROCm fp16 on RX 7800 XT</div>
+
+    <div style="margin-bottom:1rem;font-size:0.78rem;color:#555">
+        First time here? <a href="/demo" style="color:#00ff99;text-decoration:none">Try the Guided Tour →</a>
+    </div>
+
+    <details style="margin-bottom:1.5rem;border-left:2px solid #222;padding-left:1rem">
+        <summary style="cursor:pointer;color:#888;font-size:0.82rem;list-style:none;outline:none">
+            ⓘ About this test <span style="color:#444;font-size:0.72rem">(click to expand)</span>
+        </summary>
+        <div style="color:#777;font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
+            Measures the wall-power cost of generating one AI image from text.<br>
+            <strong style="color:#aaa">SD-Turbo</strong>: CPU {IMAGE_STEPS_CPU} steps (~12s) or GPU batch of {GPU_BATCH_SIZE} × {IMAGE_STEPS_GPU} steps (~10s). Note: solo-mode GPU over-samples (native is 1–4 steps) to keep runtime above the P110 polling floor.<br>
+            <strong style="color:#aaa">SDXL-Turbo</strong>: GPU only, 4 steps (native), batch of 15 (~10s).<br>
+            <strong style="color:#aaa">Compare Models ⚡</strong>: both run at 4 steps (native for each), 512×512, same seed — SD-Turbo batch 30, SDXL-Turbo batch 15. Model size is the only variable.<br>
+            Each run appends a random colour/mood modifier — live proof the image is generated, not replayed.
+        </div>
+    </details>
+
+    <label style="color:#888;font-size:0.8rem;display:block;margin-bottom:0.4rem">Model</label>
+    <div id="model-row" style="display:flex;gap:0.75rem;margin-bottom:1.2rem">
+      <div class="preset selected" id="mdl-sd-turbo" onclick="selectModelKey('sd-turbo')"
+           style="border:1px solid #00ff99;background:#00ff9911;padding:0.75rem 1rem;
+                  cursor:pointer;flex:1">
+        <div style="color:#00ff99;font-size:0.85rem;font-weight:bold">SD-Turbo</div>
+        <div style="color:#555;font-size:0.72rem">~1B params · 512×512 · CPU + GPU</div>
+      </div>
+      <div class="preset" id="mdl-sdxl-turbo" onclick="selectModelKey('sdxl-turbo')"
+           style="border:1px solid #333;padding:0.75rem 1rem;cursor:pointer;flex:1">
+        <div style="color:#aaa;font-size:0.85rem;font-weight:bold">SDXL-Turbo</div>
+        <div style="color:#555;font-size:0.72rem">~3.5B params · 512×512 · GPU only</div>
+      </div>
     </div>
 
     <label style="color:#888;font-size:0.8rem;display:block;margin-bottom:0.4rem">Prompt</label>
@@ -4229,18 +4315,25 @@ async def image_page():
 
     <div style="margin-bottom:1.25rem">
       <span style="color:#888;font-size:0.8rem;margin-right:1rem">Backend:</span>
-      <label style="font-size:0.85rem;margin-right:1.2rem;cursor:pointer">
+      <label style="font-size:0.85rem;margin-right:1.2rem;cursor:pointer" id="lbl-cpu">
         <input type="radio" name="img-device" value="cpu" checked onchange="selectedDevice=this.value"> CPU
       </label>
       <label style="font-size:0.85rem;margin-right:1.2rem;cursor:pointer">
         <input type="radio" name="img-device" value="gpu" onchange="selectedDevice=this.value"> GPU
       </label>
-      <label style="font-size:0.85rem;cursor:pointer">
+      <label style="font-size:0.85rem;cursor:pointer" id="lbl-both">
         <input type="radio" name="img-device" value="both" onchange="selectedDevice=this.value"> Both ⚡
       </label>
     </div>
 
-    <button id="run-btn" onclick="startMeasurement()">Generate &amp; Measure</button>
+    <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
+      <button id="run-btn" onclick="startMeasurement()">Generate &amp; Measure</button>
+      <button id="compare-btn" onclick="startCompareModels()"
+              style="background:#0a0a0a;border:1px solid #00ff99;color:#00ff99;
+                     padding:0.75rem 1.5rem;font-family:monospace;font-size:0.95rem;cursor:pointer">
+        Compare Models (GPU) ⚡
+      </button>
+    </div>
     <div id="status"></div>
     {prev_html}
     </div>
@@ -4249,6 +4342,7 @@ async def image_page():
 const CPU_STAGES = ['baseline','generating','done'];
 const GPU_STAGES = ['baseline','generating','done'];
 const BOTH_STAGES = ['cpu_baseline','cpu_generating','cooldown','gpu_baseline','gpu_generating','done'];
+const COMPARE_STAGES = ['small_baseline','small_generating','cooldown','large_baseline','large_generating','done'];
 const STAGE_LABELS = {{
   'baseline': 'Measuring baseline power',
   'generating': 'Generating image',
@@ -4257,11 +4351,52 @@ const STAGE_LABELS = {{
   'cooldown': 'Cooldown between passes',
   'gpu_baseline': 'GPU — measuring baseline',
   'gpu_generating': 'GPU — generating images (batch)',
+  'small_baseline': 'SD-Turbo — measuring baseline',
+  'small_generating': 'SD-Turbo — generating (GPU batch)',
+  'large_baseline': 'SDXL-Turbo — measuring baseline',
+  'large_generating': 'SDXL-Turbo — generating (GPU batch)',
   'done': 'Complete',
 }};
 let pollTimer = null;
 let selectedDevice = 'cpu';
+let selectedModelKey = 'sd-turbo';
 let imgStartTime = null;
+
+function selectModelKey(k) {{
+  selectedModelKey = k;
+  const sd  = document.getElementById('mdl-sd-turbo');
+  const sdxl = document.getElementById('mdl-sdxl-turbo');
+  if (k === 'sd-turbo') {{
+    sd.style.borderColor = '#00ff99';
+    sd.style.background = '#00ff9911';
+    sd.children[0].style.color = '#00ff99';
+    sdxl.style.borderColor = '#333';
+    sdxl.style.background = 'transparent';
+    sdxl.children[0].style.color = '#aaa';
+    // enable CPU / Both radios
+    document.querySelector('input[name="img-device"][value="cpu"]').disabled = false;
+    document.querySelector('input[name="img-device"][value="both"]').disabled = false;
+    document.getElementById('lbl-cpu').style.opacity = '1';
+    document.getElementById('lbl-both').style.opacity = '1';
+  }} else {{
+    sdxl.style.borderColor = '#00ff99';
+    sdxl.style.background = '#00ff9911';
+    sdxl.children[0].style.color = '#00ff99';
+    sd.style.borderColor = '#333';
+    sd.style.background = 'transparent';
+    sd.children[0].style.color = '#aaa';
+    // SDXL-Turbo is GPU only — disable CPU + Both, force GPU
+    const cpuIn = document.querySelector('input[name="img-device"][value="cpu"]');
+    const bothIn = document.querySelector('input[name="img-device"][value="both"]');
+    cpuIn.disabled = true;
+    bothIn.disabled = true;
+    document.getElementById('lbl-cpu').style.opacity = '0.35';
+    document.getElementById('lbl-both').style.opacity = '0.35';
+    const gpuIn = document.querySelector('input[name="img-device"][value="gpu"]');
+    gpuIn.checked = true;
+    selectedDevice = 'gpu';
+  }}
+}}
 
 function fmt(v, dp=2) {{
   if (v === null || v === undefined) return '—';
@@ -4273,19 +4408,56 @@ async function startMeasurement() {{
   if (!prompt) {{ alert('Enter a prompt'); return; }}
 
   document.getElementById('run-btn').disabled = true;
+  document.getElementById('compare-btn').disabled = true;
   document.getElementById('status').innerHTML = '';
 
   const resp = await fetch('/image/start', {{
     method: 'POST',
     headers: {{'Content-Type':'application/x-www-form-urlencoded'}},
-    body: 'prompt=' + encodeURIComponent(prompt) + '&device=' + encodeURIComponent(selectedDevice)
+    body: 'prompt=' + encodeURIComponent(prompt)
+        + '&device=' + encodeURIComponent(selectedDevice)
+        + '&model_key=' + encodeURIComponent(selectedModelKey)
   }});
   const data = await resp.json();
-  if (data.error) {{ alert(data.error); document.getElementById('run-btn').disabled=false; return; }}
+  if (data.error) {{
+    alert(data.error);
+    document.getElementById('run-btn').disabled = false;
+    document.getElementById('compare-btn').disabled = false;
+    return;
+  }}
   const jobId = data.job_id;
 
   imgStartTime = Date.now();
   renderProgress('baseline', null, null);
+  pollTimer = setInterval(() => pollJob(jobId), 1500);
+}}
+
+async function startCompareModels() {{
+  const prompt = document.getElementById('prompt').value.trim();
+  if (!prompt) {{ alert('Enter a prompt'); return; }}
+
+  document.getElementById('run-btn').disabled = true;
+  document.getElementById('compare-btn').disabled = true;
+  document.getElementById('status').innerHTML = '';
+
+  const resp = await fetch('/image/start', {{
+    method: 'POST',
+    headers: {{'Content-Type':'application/x-www-form-urlencoded'}},
+    body: 'prompt=' + encodeURIComponent(prompt)
+        + '&device=compare_models'
+        + '&model_key=sd-turbo'    // ignored by server for compare_models
+  }});
+  const data = await resp.json();
+  if (data.error) {{
+    alert(data.error);
+    document.getElementById('run-btn').disabled = false;
+    document.getElementById('compare-btn').disabled = false;
+    return;
+  }}
+  const jobId = data.job_id;
+
+  imgStartTime = Date.now();
+  renderProgress('small_baseline', null, null);
   pollTimer = setInterval(() => pollJob(jobId), 1500);
 }}
 
@@ -4302,20 +4474,24 @@ async function pollJob(jobId) {{
   if (j.stage === 'done' && j.result) {{
     clearInterval(pollTimer);
     if (j.result.mode === 'both') renderImageBoth(j.result);
+    else if (j.result.mode === 'compare_models') renderCompareModels(j.result);
     else renderResult(j.result);
     document.getElementById('run-btn').disabled = false;
+    document.getElementById('compare-btn').disabled = false;
   }}
   if (j.error) {{
     clearInterval(pollTimer);
     document.getElementById('status').innerHTML =
       '<p style="color:#ff4400">Error: ' + j.error + '</p>';
     document.getElementById('run-btn').disabled = false;
+    document.getElementById('compare-btn').disabled = false;
   }}
 }}
 
 function renderProgress(stage, result, watts) {{
-  const isBoth = BOTH_STAGES.includes(stage) && stage !== 'done';
-  const stageKeys = isBoth ? BOTH_STAGES : CPU_STAGES;
+  const isCompare = COMPARE_STAGES.includes(stage) && stage !== 'done';
+  const isBoth = !isCompare && BOTH_STAGES.includes(stage) && stage !== 'done';
+  const stageKeys = isCompare ? COMPARE_STAGES : (isBoth ? BOTH_STAGES : CPU_STAGES);
   const stageIdx = stageKeys.indexOf(stage);
   wlRenderProgress({{
     header: '\u26a1 Measuring\u2026 do not close this tab',
@@ -4361,6 +4537,49 @@ function renderImageBoth(r) {{
       </div>
       <div style="font-size:0.75rem;color:#444;margin-top:0.5rem">
         Prompt: "${{r.full_prompt}}" · modifier: <em>${{r.modifier}}</em>
+      </div>
+      <p class="scope-note">${{r.scope}}</p>
+    </div>`;
+}}
+
+function _modelCard(side_r) {{
+  const e = side_r.energy;
+  const gen = side_r.generation;
+  const imgHtml = gen.b64_png
+    ? `<div style="margin-top:0.75rem"><img src="data:image/png;base64,${{gen.b64_png}}" style="max-width:100%;border:1px solid #222"></div>`
+    : '';
+  return `<div style="border:1px solid #222;padding:1rem;flex:1;min-width:260px">
+    <div style="color:#00ff99;font-size:0.9rem;font-weight:bold;margin-bottom:0.25rem">${{gen.model_label}}</div>
+    <div style="color:#555;font-size:0.72rem;margin-bottom:0.75rem">${{gen.model}} · ${{gen.size}}px · ${{gen.steps}} steps × batch ${{gen.batch_size}}</div>
+    <div class="kpis">
+      <div class="kpi"><div class="val" style="font-size:1.2rem">${{fmt(e.wh_per_image,4)}} Wh</div><div class="lbl">per image</div></div>
+      <div class="kpi"><div class="val" style="font-size:1.2rem">${{fmt(gen.gen_s_per_image,1)}} s</div><div class="lbl">gen/image</div></div>
+      <div class="kpi"><div class="val" style="font-size:1.1rem">${{fmt(e.delta_w,1)}} W</div><div class="lbl">delta W</div></div>
+      <div class="kpi"><div class="val" style="font-size:1.1rem">${{e.poll_count}}</div><div class="lbl">polls</div></div>
+    </div>
+    <div style="font-size:0.78rem;color:#555;margin-top:0.5rem">${{e.confidence.flag}} ${{e.confidence.label}}</div>
+    ${{imgHtml}}
+  </div>`;
+}}
+
+function renderCompareModels(r) {{
+  const a = r.analysis;
+  document.getElementById('status').innerHTML = `
+    <div class="result-box">
+      <h2>SD-Turbo vs SDXL-Turbo — Same Prompt + Seed</h2>
+      <div style="background:#111;border:1px solid #333;padding:0.75rem 1rem;margin-bottom:1.25rem;font-size:0.85rem;color:#ccc">
+        ${{a.finding}}
+      </div>
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;align-items:stretch">
+        ${{_modelCard(r.small)}}
+        ${{_modelCard(r.large)}}
+      </div>
+      <div style="font-size:0.75rem;color:#444;margin-top:0.5rem">
+        Prompt: "${{r.full_prompt}}" · modifier: <em>${{r.modifier}}</em> · seed: ${{r.seed}}
+      </div>
+      <div style="font-size:0.75rem;color:#666;margin-top:0.75rem;font-style:italic">
+        Quality is subjective. Judge the visual output above — is the larger model's image worth
+        ${{a.energy_ratio_large_over_small}}× the energy for this prompt?
       </div>
       <p class="scope-note">${{r.scope}}</p>
     </div>`;
@@ -4421,18 +4640,35 @@ if (_resumeJob) {{ document.getElementById('run-btn').disabled = true; pollTimer
 
 
 @app.post("/image/start")
-async def image_start(prompt: str = Form(...), device: str = Form("cpu")):
-    if device not in ("cpu", "gpu", "both"):
+async def image_start(prompt: str = Form(...),
+                      device: str = Form("cpu"),
+                      model_key: str = Form("sd-turbo")):
+    if device not in ("cpu", "gpu", "both", "compare_models"):
         device = "cpu"
+    if model_key not in IMAGE_MODELS:
+        return JSONResponse({"error": f"Unknown model: {model_key}"}, status_code=400)
+    cfg_m = IMAGE_MODELS[model_key]
+    if device in ("cpu", "both") and not cfg_m["cpu_ok"]:
+        return JSONResponse(
+            {"error": f"{cfg_m['label']} is GPU-only — pick GPU or Compare Models."},
+            status_code=400,
+        )
     job_id = uuid.uuid4().hex[:8]
-    label = f"Image ({device.upper()}) — {prompt[:35]}"
+    if device == "compare_models":
+        label = f"Image (compare SD/SDXL-Turbo) — {prompt[:35]}"
+    else:
+        label = f"Image ({cfg_m['label']} · {device.upper()}) — {prompt[:35]}"
 
     async def coro():
         try:
-            if device == "both":
-                result = await run_image_both_measurement(prompt, job_id, jobs)
+            if device == "compare_models":
+                result = await run_image_compare_models_measurement(prompt, job_id, jobs)
+            elif device == "both":
+                result = await run_image_both_measurement(
+                    prompt, job_id, jobs, model_key=model_key)
             else:
-                result = await run_image_measurement(prompt, job_id, jobs, device=device)
+                result = await run_image_measurement(
+                    prompt, job_id, jobs, device=device, model_key=model_key)
             save_result("image", job_id, result)
             jobs[job_id]["result"] = result
         except Exception as e:
@@ -4816,6 +5052,18 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
     line-height: 1.6;
   }
 
+  /* ── Home link (top + bottom) — matches `_BACK` used on other pages ── */
+  .home-link {
+    display: inline-block;
+    color: #555;
+    text-decoration: none;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .home-link:hover { color: var(--accent); }
+  .home-link.top    { margin-bottom: 24px; }
+  .home-link.bottom { margin-top: 32px; }
+
   /* ── Responsive ── */
   @media (max-width: 600px) {
     .content { padding: 24px 16px 60px; }
@@ -4837,6 +5085,8 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
 </div>
 
 <div class="content">
+
+  <a href="/" class="home-link top">&larr; Home</a>
 
   <h1>Measurement Methodology</h1>
   <p class="subtitle">How WattLab measures the energy cost of compute tasks &mdash; and what it doesn&rsquo;t measure.</p>
@@ -4991,27 +5241,34 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
     <tr><td>Storage</td><td>457 GB (NVMe)</td></tr>
     <tr><td>Idle power</td><td>~51&ndash;54W (stable), occasional drift to 58W</td></tr>
     <tr><td>Measurement</td><td>Tapo P110 smart plug, 1-second polling via local API (tapo 0.8.12)</td></tr>
-    <tr><td>Video</td><td>ffmpeg 6.1.1 &mdash; libx264, libx265, libaom-av1 (CPU); h264_vaapi, hevc_vaapi, av1_vaapi (GPU)</td></tr>
-    <tr><td>LLM</td><td>Ollama 0.20.2 &mdash; TinyLlama 1.1B, Mistral 7B (CPU + ROCm GPU)</td></tr>
-    <tr><td>Image</td><td>SD-Turbo via PyTorch + diffusers (CPU + ROCm GPU)</td></tr>
+    <tr><td>Video</td><td>ffmpeg 6.1.1 &mdash; libx264, libx265, libsvtav1 (CPU); h264_vaapi, hevc_vaapi, av1_vaapi (GPU, full VAAPI pipeline)</td></tr>
+    <tr><td>LLM</td><td>Ollama 0.20.2 &mdash; TinyLlama 1.1B, Mistral 7B, Gemma 3 12B (CPU + ROCm GPU); Phi-4 14B available for RAG</td></tr>
+    <tr><td>Image</td><td>PyTorch + diffusers &mdash; SD-Turbo (~1B), SDXL-Turbo (~3.5B, GPU only); CPU + ROCm GPU</td></tr>
   </table>
 
   <h2 id="tests">Test Types</h2>
 
   <h3>Video transcoding</h3>
-  <p>Transcode a source file (default: Netflix Meridian 4K, CC BY 4.0) to a target codec and resolution. Measures the energy cost of the encode pipeline including decode, colour-space conversion, and encode. Supports CPU vs GPU comparison: both paths are run sequentially with a cooldown between them, and results are presented side by side.</p>
-  <p>Available presets: H.264 (CRF 23 / QP 23), H.265 (CRF 28 / QP 28), AV1 (CRF 35 / QP 35). CPU encoders use constant-quality rate control; GPU encoders use fixed QP. The ffmpeg command used for each run is logged in the result JSON for full reproducibility.</p>
+  <p>Transcode a source file (default: Netflix Meridian 4K, CC BY 4.0) to a target codec and 1080p. Measures the energy cost of the full encode pipeline &mdash; decode, colour-space conversion, scale, encode. Supports CPU vs GPU comparison: both paths are run sequentially with a cooldown between them, and results are presented side by side.</p>
+  <p>Six presets across three codecs: <strong>H.264</strong> (libx264 / h264_vaapi, 4000 kbps), <strong>H.265</strong> (libx265 / hevc_vaapi, 2000 kbps), <strong>AV1</strong> (libsvtav1 / av1_vaapi, 1500 kbps). A seventh <strong>Compare all codecs</strong> preset runs all six in sequence and produces a cross-codec energy matrix.</p>
+  <p>All presets use <strong>ABR (Average Bit Rate)</strong> rate control at a shared per-codec bitrate target, so CPU and GPU receive the identical encoding task &mdash; output file sizes match across devices as confirmation. All GPU presets use the <strong>full VAAPI pipeline</strong>: hardware decode (<code>-hwaccel vaapi</code>) + <code>scale_vaapi</code> + hardware encode, with frames GPU-resident throughout. This represents real live-encoding workflows (Harmonic, Ateme); an earlier partial pipeline (CPU decode + GPU encode) has been replaced because it was unrepresentative and bottlenecked on CPU decode overhead.</p>
+  <p>The ffmpeg command used for each run is logged in the result JSON, editable from the page (on LAN), and reproduced in the result card for full transparency.</p>
 
   <div class="callout">
-    <strong>Open item:</strong> Confirming that CPU and GPU presets produce comparable output quality (same effective bitrate, GOP structure, profile level) requires a dedicated working session. Current results compare time and energy but the quality dimension is not yet controlled. This is noted on the roadmap.
+    <strong>Open item (narrower than before):</strong> With ABR, the bitrate target is now equal across devices. GOP structure and profile level are not yet explicitly controlled and may differ between CPU and GPU encoder defaults &mdash; a working session with the measurement team is planned to confirm apples-to-apples output at the profile/GOP level. A second benchmark family at each codec&rsquo;s natural operating point (CRF for CPU, QP for GPU) is also on the roadmap.
   </div>
 
   <h3>LLM inference</h3>
-  <p>Run a language model on a fixed prompt and measure energy per token. Supports cold inference (model unloaded before each run, measuring load + inference cost) and warm inference (model pre-loaded, measuring steady-state cost). Batch mode runs the prompt multiple times in sequence, with a configurable rest period between iterations, and reports the aggregate.</p>
+  <p>Run a language model on a fixed prompt and measure energy per token. Three model sizes are available spanning small to large: <strong>TinyLlama 1.1B</strong>, <strong>Mistral 7B</strong>, <strong>Gemma 3 12B</strong>. Supports cold inference (model unloaded before each run, measuring load + inference cost) and warm inference (model pre-loaded, measuring steady-state cost). Batch mode runs the prompt multiple times in sequence, with a configurable rest period between iterations, and reports the aggregate. CPU vs GPU comparison is also available.</p>
   <p>Prompts are editable and saved in the result JSON. Streaming output is displayed word-by-word as proof that inference is happening live. The mWh/token metric divides total energy by total tokens generated.</p>
 
   <h3>Image generation</h3>
-  <p>Generate images from text prompts using Stable Diffusion Turbo (8 inference steps, 512&times;512). A random colour/mood modifier is appended to the prompt on each run to demonstrate that generation is live, not cached. GPU mode generates a batch of images in a single measurement window for reliable P110 capture.</p>
+  <p>Generate images from text prompts using one of two diffusion models, both distilled &ldquo;turbo&rdquo; variants designed for 1&ndash;4 step inference:</p>
+  <ul style="margin: 12px 0 18px 20px; font-size: 14px; line-height: 1.7;">
+    <li><strong>SD-Turbo (~1B)</strong> &mdash; ADD-distilled SD 2.1. CPU or GPU. Solo-mode GPU uses 20 steps &times; batch 5 to keep runtime above the P110 polling floor (the model is over-sampled relative to its native 1&ndash;4 step range).</li>
+    <li><strong>SDXL-Turbo (~3.5B)</strong> &mdash; ADD-distilled SDXL. GPU only (fp32 VAE upcast on Navi31 makes CPU impractical). 4 steps (native) &times; batch 15 at 512&times;512.</li>
+  </ul>
+  <p><strong>Compare Models ⚡</strong> runs both on GPU with the same prompt, same seed, same resolution (512&times;512) and each at its native 4-step operating point (SD-Turbo batch 30, SDXL-Turbo batch 15) &mdash; model size is the only variable so the energy comparison is apples-to-apples. Image quality is subjective and presented side-by-side for visual judgement. A random colour/mood modifier is appended to every prompt as live-generation proof.</p>
 
   <h3>RAG (Retrieval-Augmented Generation)</h3>
   <p>Compare three modes of LLM inference: baseline (no retrieval), RAG with 3 context chunks, and RAG with 8 context chunks. Uses ChromaDB with sentence-transformer embeddings to retrieve relevant passages from a document corpus before prompting the LLM. The &ldquo;Compare 3 modes&rdquo; function runs all three sequentially with fresh baselines, producing side-by-side energy comparisons.</p>
@@ -5028,17 +5285,13 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
 
   <div class="open-q"><span class="marker">&#9658;</span><span><strong>PSU efficiency curve.</strong> Wall power includes PSU conversion losses, which are non-linear (PSUs are less efficient at low and very high loads). Two tasks that consume the same <em>internal</em> power may report different wall-power deltas depending on where they sit on the PSU efficiency curve.</span></div>
 
-  <div class="open-q"><span class="marker">&#9658;</span><span><strong>CPU thermal cross-talk.</strong> During GPU-intensive tasks, the CPU temperature rises more than during CPU-only tasks of comparable intensity. This may affect energy attribution between components. Under investigation.</span></div>
-
   <h2 id="open">Open Questions</h2>
 
   <p>These are questions WattLab has surfaced but not yet answered. They are published here in the interest of transparency.</p>
 
   <div class="open-q"><span class="marker">?</span><span><strong>Confidence multipliers.</strong> The 5&times; / 2&times; noise multipliers for &#x1F7E2;/&#x1F7E1; are currently set by judgement. A working session with the measurement team is planned to derive statistically grounded values from repeated calibration runs across different workloads and thermal states.</span></div>
 
-  <div class="open-q"><span class="marker">?</span><span><strong>Transcoding quality equivalence.</strong> CPU and GPU presets use different rate-control modes (CRF vs QP). Confirming output quality equivalence (VMAF, bitrate, GOP) is needed before energy comparisons can be fully apples-to-apples.</span></div>
-
-  <div class="open-q"><span class="marker">?</span><span><strong>GPU energy crossover point.</strong> On H.264, the GPU is ~34% faster but uses ~10% more energy. At what clip duration or complexity does GPU become more energy-efficient? Is this codec-dependent?</span></div>
+  <div class="open-q"><span class="marker">?</span><span><strong>Transcoding profile/GOP equivalence.</strong> ABR rate control now gives CPU and GPU the same bitrate target, and output file sizes match as confirmation. GOP structure and profile level are still default-per-encoder and have not been explicitly normalised. A working session is planned to confirm apples-to-apples at that level, and to add a second benchmark family at each codec&rsquo;s natural operating point (CRF for CPU, QP for GPU).</span></div>
 
   <div class="open-q"><span class="marker">?</span><span><strong>LLM batch size effect.</strong> Does mWh/token change as batch count increases (thermal saturation, memory pressure)? Are the first and last runs in a batch energetically equivalent?</span></div>
 
@@ -5048,9 +5301,11 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
 
   <div class="footer-note">
     WattLab is built and maintained by <a href="https://greeningofstreaming.org" style="color:var(--accent);text-decoration:none;">Greening of Streaming</a>, a French NGO (loi 1901).<br>
-    Methodology version 0.1 &middot; April 2026 &middot; Feedback: bs@ctoic.net<br>
+    Methodology version 0.2 &middot; last updated 2026-04-24 &middot; Feedback: bs@ctoic.net<br>
     Source: <a href="https://github.com/greeningofstreaming/wattlab" style="color:var(--accent);text-decoration:none;">github.com/greeningofstreaming/wattlab</a>
   </div>
+
+  <a href="/" class="home-link bottom">&larr; Home</a>
 
 </div>
 </body>

@@ -7,6 +7,74 @@ Scope: device layer only (GoS1). Network, CDN, and CPE explicitly excluded.
 
 ---
 
+## Session 14 — 2026-04-24
+
+### What we did
+
+**Larger LLM tier · SDXL-Turbo + Compare Models · VRAM leak fix · Progressive-disclosure UX pilot · Methodology refresh**
+
+#### LLM tiers — adding a "large" option
+Previous tiers: TinyLlama 1.1B (small), Mistral 7B (mid). Added **Gemma 3 12B** as the large tier via `ollama pull gemma3:12b` (8.1GB Q4_0). Choice rationale: same distillation family story (Google alongside Meta/Mistral), fits cleanly in 12GB VRAM without offload, knowledge cutoff ~Aug 2024. SDK knowledge cutoff is past the model's actual cutoff — when asked to write a dated report it filled in 2023-10-26 (a notorious pretraining-corpus default), which is an LLM artefact not a WattLab bug.
+
+Also confirmed `phi4:latest` (14B) was already pulled but missing from `llm.py` — it's in `rag.py` already, so added there too. No HTML changes to `/llm` or `/rag`: both pages iterate `MODELS` so new entries auto-render as selector cards.
+
+#### SDXL-Turbo + Compare Models
+Added `stabilityai/sdxl-turbo` (~3.5B params) as a second diffusion model. `image_gen.py` gained an `IMAGE_MODELS` registry and `generate_image()` now takes a `model_key` parameter; entry points `run_image_measurement` and `run_image_both_measurement` were extended accordingly.
+
+New `run_image_compare_models_measurement()` runs both models on GPU with same prompt + seed, both at 512×512 and both at their native 4-step operating point (SD-Turbo batch 30, SDXL-Turbo batch 15). Result is rendered side-by-side on `/image` — image quality is subjective (no single metric), energy per image is measured for each.
+
+#### SDXL-Turbo on Navi31 — investigation
+Three issues surfaced:
+
+1. **Black images with fp16 VAE.** SDXL's VAE overflows in fp16 on our RX 7800 XT (known issue). Diffusers auto-detects this and upcasts the VAE to fp32 for decode (via deprecated `upcast_vae`). We leave `force_upcast=True`.
+2. **VRAM OOM at 1024×1024.** The fp32 VAE decode allocates 4.5 GB for a single conv, exceeding our 12 GB budget when UNet + text encoders are resident. We tried `enable_vae_tiling()` but the default SDXL `tile_latent_min_size=128` uses a strict `>` check, so a 1024-output latent (exactly 128×128) fails to trigger tiling. Forced `tile_latent_min_size=64` triggers tiling but makes decode 100× slower (~115s per image).
+3. **Resolution.** Picked 512×512 as the operating point — fp32 VAE decode fits comfortably, no tiling needed. Bonus: 512 is native for SD-Turbo, so Compare Models becomes apples-to-apples at same resolution with model size as the only variable.
+
+#### VRAM leak in `generate_image`
+Observed the uvicorn worker holding 9.67 GB of VRAM with no active jobs. Root cause: pipelines created in `generate_image()` weren't being released between calls — Python GC isn't timely, and ROCm's HIP allocator holds cached memory. Added `try/finally` with `del pipe`, `gc.collect()`, `torch.cuda.empty_cache()`. Latent bug, present since the image module was added; now fixed.
+
+#### Compare Models — step parity correction
+Initial Compare Models implementation ran SD-Turbo at its solo-mode 20 steps and SDXL-Turbo at 4 steps. Caught mid-conversation: this is not apples-to-apples. SD-Turbo at 20 steps is 5× over-sampled relative to its native 1–4 range (it's set high in solo mode to give P110 enough runtime). In a model comparison, SD-Turbo was being charged for over-sampling that doesn't improve its distilled output.
+
+Fix: added `compare_steps`/`compare_batch` fields to `IMAGE_MODELS`, and `generate_image()` accepts optional `steps_override`/`batch_override`. Compare Models now runs both at 4 steps; SD-Turbo batch 30 to keep wall time ≈ 10s for P110 reliability. Solo mode unchanged for historical continuity.
+
+#### Progressive-disclosure UX pilot
+Question raised: should WattLab have two UI modes (power-user vs visitor)? Considered, rejected. Two full modes means 2× HTML to maintain, 2× copy that drifts, and `/demo` (Guided Tour) + `/methodology` already serve the visitor audience. Instead:
+
+- Replaced verbose `.info` blocks on `/image`, `/video`, `/llm`, `/rag` with collapsed `<details>` ("ⓘ About this test") — default collapsed for lab use, expands for first-time visitors.
+- Added a subtle "First time here? Try the Guided Tour →" link near the top of each test page.
+- Subtitle (one-line hardware/scope summary) stays always visible.
+- All control rows (model picker, preset cards, prompt editor, buttons) untouched — lab workflow unaffected.
+
+Worth revisiting if visitor feedback says the collapsed default is too hidden.
+
+#### Methodology page refresh
+`/methodology` bumped to version 0.2 (last updated 2026-04-24):
+- **Video section** rewritten for ABR rate control + full VAAPI pipeline + `all_codecs` preset.
+- **Image section** rewritten for SD-Turbo + SDXL-Turbo + Compare Models, with step-count rationale.
+- **LLM section** updated to list the three size tiers (TinyLlama / Mistral / Gemma 3).
+- **Hardware table** updated for new codecs, models.
+- **Removed** stale "CPU thermal cross-talk" limitation (resolved by full GPU pipeline in session 12).
+- **Removed** stale "GPU energy crossover" open question (superseded by session 13 ABR findings — GPU is now 43–81% less energy across codecs).
+- **Rewrote** "Transcoding quality equivalence" open question to reflect ABR progress (bitrate now controlled; GOP/profile still TBD).
+- Added matching `← Home` links top and bottom of content (`.home-link` class — same style as the `_BACK` link on other pages).
+
+### Files touched
+- `wattlab_service/llm.py` — Gemma 3 12B added to `MODELS`
+- `wattlab_service/rag.py` — Gemma 3 12B added to `MODELS`; pre-existing Phi-4 entry kept
+- `wattlab_service/image_gen.py` — `IMAGE_MODELS` registry; `model_key`, `steps_override`, `batch_override` params; `run_image_compare_models_measurement`; `_analyse_models`; VRAM cleanup in `finally`
+- `wattlab_service/main.py` — `/image/start` accepts `model_key` + `compare_models` device; model picker + Compare Models button + `renderCompareModels()` on `/image`; progressive-disclosure collapsibles on `/image`, `/video`, `/llm`, `/rag`; methodology rewrite + home links
+- `wattlab_service/persist.py` — `compare_models` branch in `_summarise`
+- `CLAUDE.md` — session 14 entry, deferred list tidied
+- `JOURNAL.md` — this entry
+
+### Open items coming out of this session
+- Restart `wattlab` systemd service to pick up changes (sudo required — can't do from this agent)
+- Once restarted, validate Compare Models end-to-end with a real measurement (can't test from the agent's process because the running uvicorn worker still holds leaked VRAM from pre-fix state)
+- Watch whether the progressive-disclosure default is too hidden for visitors — if so, revisit with a visible density toggle or make the "ⓘ About this test" open by default on first visit via `localStorage`
+
+---
+
 ## Session 13 — 2026-04-10
 
 ### What we did

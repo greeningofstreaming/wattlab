@@ -4,7 +4,7 @@ WattLab measures the real device-side energy cost of video transcoding and AI in
 
 Built by [Greening of Streaming](https://greeningofstreaming.org), a French NGO working on the environmental impact of streaming infrastructure.
 
-**Live instance:** [wattlab.greeningofstreaming.org](http://wattlab.greeningofstreaming.org) *(DNS pending — currently accessible via SSH tunnel)*
+**Live instance:** [wattlab.greeningofstreaming.org](https://wattlab.greeningofstreaming.org)
 
 ---
 
@@ -12,9 +12,9 @@ Built by [Greening of Streaming](https://greeningofstreaming.org), a French NGO 
 
 | Test | What you get |
 |---|---|
-| Video transcode | Energy (Wh) and time for CPU vs GPU H.264/H.265/AV1 encode |
-| LLM inference | mWh per output token, tokens/sec — Mistral 7B and TinyLlama |
-| Image generation | Wh per image — SD-Turbo, CPU and GPU paths |
+| Video transcode | Energy (Wh) and time for CPU vs GPU — H.264, H.265, AV1 at matched ABR bitrates. "Compare all codecs" runs all six presets in one go. |
+| LLM inference | mWh per output token, tokens/sec — TinyLlama 1.1B, Mistral 7B, Gemma 3 12B across three size tiers |
+| Image generation | Wh per image — SD-Turbo (~1B), SDXL-Turbo (~3.5B). "Compare Models" runs both with same prompt + seed so model size is the only variable. |
 | RAG energy test | Energy cost of retrieval-augmented generation vs plain LLM — baseline / rag / rag_large compared side-by-side |
 
 All figures are delta above idle baseline, sampled at 1-second intervals via a Tapo P110 smart plug on the mains supply.
@@ -51,17 +51,21 @@ These exclusions are deliberate. Scope statements appear on every result.
 
 ## Key findings so far
 
-**Video — H.264 1080p from 4K (4 runs) 🟢**
-- CPU: 174.3s mean, 4.06 Wh mean
-- GPU: 114.0s mean, 4.42 Wh mean
-- GPU is 34.5% faster but uses 9.7% more energy on this workload
+**Video — ABR all-codecs benchmark (Meridian 120s, 3 runs, all 🟢)**
+- H.264 at 4000 kbps: CPU 37.3s / 0.83 Wh · GPU 17.5s / 0.37 Wh → GPU ~55% less energy
+- H.265 at 2000 kbps: CPU 70.3s / 1.58 Wh · GPU 14.5s / 0.29 Wh → GPU ~81% less energy
+- AV1 at 1500 kbps: CPU 30.8s / 0.65 Wh · GPU 14.5s / 0.30 Wh → GPU ~55% less energy
+- All GPU presets use the full VAAPI pipeline (decode + scale + encode). Earlier "GPU uses more energy" result was from a partial pipeline (CPU decode + GPU encode) — superseded.
 
 **LLM cold inference 🟢**
 - Mistral 7B T3: 0.94 mWh/token
 - TinyLlama 1.1B T3: 0.06 mWh/token (~15× more efficient per token)
+- Gemma 3 12B now available for larger-model comparison
 
 **Image generation — SD-Turbo CPU 🟢**
 - 0.21 Wh/image, 12s generation time, ~30W delta above idle
+
+**Ship-of-Theseus honesty:** when earlier methodology improvements (full GPU pipeline, ABR rate control) change what a result means, the old finding is marked superseded rather than silently overwritten.
 
 ---
 

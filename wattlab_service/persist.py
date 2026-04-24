@@ -89,6 +89,7 @@ def _summarise(job_type: str, data: dict) -> dict:
         mode = data.get("mode", "cpu")
         summary["mode"] = mode
         summary["full_prompt"] = data.get("full_prompt", data.get("prompt", ""))
+        summary["model_label"] = data.get("model_label")
         if mode == "both":
             for side in ("cpu", "gpu"):
                 s = data.get(side, {})
@@ -97,6 +98,20 @@ def _summarise(job_type: str, data: dict) -> dict:
                 summary[side] = {
                     "delta_e_wh": e.get("delta_e_wh"),
                     "delta_t_s": gen.get("total_s"),
+                    "confidence": e.get("confidence", {}),
+                    "b64_png": gen.get("b64_png", ""),
+                }
+        elif mode == "compare_models":
+            for side in ("small", "large"):
+                s = data.get(side, {})
+                e = s.get("energy", {})
+                gen = s.get("generation", {})
+                summary[side] = {
+                    "model_label": gen.get("model_label"),
+                    "size_px": gen.get("size"),
+                    "wh_per_image": e.get("wh_per_image"),
+                    "delta_e_wh": e.get("delta_e_wh"),
+                    "delta_t_s": gen.get("gen_s_per_image"),
                     "confidence": e.get("confidence", {}),
                     "b64_png": gen.get("b64_png", ""),
                 }

@@ -33,6 +33,7 @@ TASKS = {
 MODELS = {
     "tinyllama": {"label": "TinyLlama", "size": "637MB", "params": "1.1B"},
     "mistral": {"label": "Mistral 7B", "size": "4.4GB", "params": "7B"},
+    "gemma3:12b": {"label": "Gemma 3 12B", "size": "8.1GB", "params": "12B"},
 }
 
 async def measure_baseline(polls: int = 10) -> float:

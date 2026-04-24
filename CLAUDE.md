@@ -1,6 +1,6 @@
 # WattLab — Claude Code Context File
 # Auto-loaded by Claude Code. Keep this current.
-# Last updated: 2026-04-10 (Session 13)
+# Last updated: 2026-04-24 (Session 14)
 # See also: GOS1_INFRA.md — server infrastructure, Nextcloud backup, personal stack context
 
 ## Project Identity
@@ -53,8 +53,8 @@ BouyguesBox (192.168.1.x)
 - Python: tapo==0.8.12, python-dotenv, fastapi, uvicorn, python-multipart, torch 2.5.1+rocm6.2, diffusers, transformers, accelerate, pillow
 - System: lm-sensors, ffmpeg 6.1.1, nmap
 - AI: Ollama 0.20.2 (systemd service, port 11434)
-- Models: tinyllama:latest (1.1B), mistral:latest (7B), x/z-image-turbo (12GB, GPU blocked), x/flux2-klein (5.7GB, CUDA/MLX only)
-- Image gen: stabilityai/sd-turbo via diffusers (CPU, cached in ~/.cache/huggingface)
+- Models: tinyllama:latest (1.1B), mistral:latest (7B), gemma3:12b (12B), phi4:latest (14B), x/z-image-turbo (12GB, GPU blocked), x/flux2-klein (5.7GB, CUDA/MLX only)
+- Image gen: stabilityai/sd-turbo + stabilityai/sdxl-turbo via diffusers (CPU for SD-Turbo only; GPU via ROCm for both; cached in ~/.cache/huggingface)
 
 ## Repo Structure
 ```
@@ -214,6 +214,23 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] `/methodology` confidence section updated to explain variance-relative approach
 - [x] CLAUDE.md/JOURNAL.md updated; SSH tunnel URL clarified (localhost:8000, not 192.168.1.62)
 
+### Session 14 — Larger LLM, SDXL-Turbo, Compare Models, Progressive Disclosure (2026-04-24) ✅
+- [x] **Gemma 3 12B** added to LLM + RAG pages — via `ollama pull gemma3:12b` (8.1GB Q4). Rounds out the size tiers: TinyLlama (1.1B) · Mistral (7B) · Gemma 3 (12B). Also confirmed `phi4:latest` (14B) was already pulled; added to RAG `MODELS` registry. No code changes on `/llm` or `/rag` HTML — both pages iterate `MODELS` so cards auto-render.
+- [x] **SDXL-Turbo (~3.5B)** added to image gen — `stabilityai/sdxl-turbo` via PyTorch + diffusers on ROCm. `IMAGE_MODELS` registry in `image_gen.py` replaces the single hardcoded `IMAGE_MODEL_ID`; `generate_image()` takes a `model_key` parameter.
+- [x] **Compare Models ⚡** on `/image` — new `run_image_compare_models_measurement()` runs SD-Turbo then SDXL-Turbo on GPU with the same prompt + seed at 512×512, both at 4 native steps (SD-Turbo batch 30, SDXL-Turbo batch 15). Side-by-side rendering; quality is subjective (no single metric), energy per image is measured. Persist + Previous Runs handle the new `compare_models` mode.
+- [x] **VAE/VRAM investigation on SDXL-Turbo** — Navi31 fp16 VAE produces black images so diffusers auto-upcasts to fp32; at 1024×1024 the fp32 decode alloc (4.5 GB) busts our 12 GB budget. Default SDXL tile threshold `tile_latent_min_size=128` uses strict `>` check so 1024 latent (128) just fails to trigger tiling. Resolution: run at 512×512 (fp32 VAE path fits comfortably, no tiling needed).
+- [x] **VRAM leak fix in `generate_image`** — pipelines were accumulating in the uvicorn worker (~2 GB per call not released). Added `try/finally` with `del pipe`, `gc.collect()`, `torch.cuda.empty_cache()`. Previously observed 9.67 GB stranded on a service with no active jobs.
+- [x] **Compare Models step-parity** — caught that SD-Turbo at solo-mode 20 steps vs SDXL-Turbo at 4 steps was not apples-to-apples (SD-Turbo was 5× over-sampled for P110 reliability). New `compare_steps`/`compare_batch` config per model runs both at their native 4-step operating point during Compare Models (SD-Turbo solo mode kept at 20×5 for historical continuity).
+- [x] **Progressive-disclosure pilot across test pages** — `/image`, `/video`, `/llm`, `/rag`. Replaced verbose `.info` blocks with collapsed `<details>` ("ⓘ About this test"), added a subtle "First time here? Try the Guided Tour →" link near the top on each page. Power users see a tighter page; visitors can expand the explainer. Two-mode UI (visitor/power) was considered and rejected in favour of progressive disclosure + already-existing `/demo` + `/methodology`.
+- [x] **Methodology page refresh** (`/methodology` → version 0.2, 2026-04-24):
+  - Video section: rewritten for ABR rate control + full VAAPI pipeline + `all_codecs` preset
+  - Hardware table: LLM row updated (TinyLlama/Mistral/Gemma 3 + Phi-4); Image row updated (SD-Turbo + SDXL-Turbo)
+  - Image section: SD-Turbo + SDXL-Turbo + Compare Models, with step-count rationale
+  - Removed stale "CPU thermal cross-talk" limitation (resolved by full GPU pipeline in session 12)
+  - Removed stale "GPU energy crossover" open question (superseded by session 13 ABR findings — GPU is now 43–81% less energy)
+  - Rewrote "Transcoding quality equivalence" open question to reflect ABR progress (bitrate controlled; GOP/profile still TBD)
+  - Added Home links top + bottom (`.home-link` class matching other pages' `← Home` style)
+
 ### Session 13 — ABR Benchmark, Compare All Codecs, HTTPS, CSV/Output fixes (2026-04-10) ✅
 - [x] **ABR rate control** across all 6 presets — replaced CRF (CPU) and QP (GPU) with `-b:v Nk` shared bitrate target per codec (H.264: 4000 kbps, H.265: 2000 kbps, AV1: 1500 kbps). CPU and GPU now receive identical tasks; output file sizes match as confirmation. Settings: `h264_bitrate_kbps`, `h265_bitrate_kbps`, `av1_bitrate_kbps` (editable in Settings page).
 - [x] **Compare all codecs** — new `all_codecs` preset runs all 6 presets (3 codec pairs, sequential with cooldown). Returns energy matrix with `analyse_all()` cross-codec summary. UI: matrix table (CPU time/energy/output · GPU time/energy/output · conf per codec), highlights for most efficient + fastest, collapsible per-codec detail cards.
@@ -249,14 +266,16 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` — restored 2026-04-10
 - [x] SSL: certbot provisioned 2026-04-10. Service now at https://wattlab.greeningofstreaming.org
 - [x] CPU temp under GPU load: resolved by full GPU pipeline switch (session 12) — frames stay GPU-resident, CPU no longer involved in decode/DMA
+- [x] phi4 pull: already present (`phi4:latest`, 9.1GB). Added to RAG `MODELS` registry in session 14.
+- [x] GPU image generation: SD-Turbo + SDXL-Turbo running on ROCm via diffusers (session 14). Compare Models ⚡ gives apples-to-apples size comparison.
+- [x] SDXL-Turbo evaluation — done in session 14, kept at 512×512 (1024 busts VRAM via fp32 VAE upcast on Navi31)
 - [ ] Image page progress bar: add elapsed time (video + LLM already have it)
-- [ ] GPU image generation: code complete, needs first clean measurement run
-- [ ] phi4 pull: `ollama pull phi4` (9.1GB) — enables 14B model in RAG compare
 - [ ] Confidence multiplier grounding: working session with Tanya — `variance_green_x`/`variance_yellow_x` (5×/2×) currently by judgement; need statistical grounding from calibration run data
 - [ ] Transcoding profile documentation: GOP structure and profile level not yet confirmed apples-to-apples across codecs — bitrate target is now standardised (ABR), but GOP/profile still TBD. Work with Simon/Tanya.
 - [ ] Benchmark 2: representative real-world presets — CRF (CPU) and QP (GPU), codec-appropriate rate control. Benchmark 1 (ABR, current) ensures identical task; Benchmark 2 would show each codec at its natural operating point. Add to WATTLAB_SPEC.md.
 - [ ] main.py refactor: split into routes/, Jinja templates, typed models, tests. Raised in session 8 external audit. Valid technical debt; deferred until post-demo.
 - [ ] Dockerize WattLab service — isolate from future GoS1 projects. Stage 1: FastAPI + VAAPI (`--device /dev/dri`), `--network host`, drop or proxy focus mode via thin host helper socket service. Stage 2 (later, if portability needed): full ROCm image for GPU image gen. Ollama stays as host systemd service, accessed over host network. See conversation 2026-04-10 for full analysis.
+- [ ] Power-user/visitor UX: progressive-disclosure pilot applied to all test pages in session 14; watch to see if collapsed `ⓘ About this test` + `/demo` link suffices, or if a visible density toggle is needed later.
 
 ## Key Findings to Date
 
@@ -303,3 +322,17 @@ All presets on ABR (H.264: 4000 kbps, H.265: 2000 kbps, AV1: 1500 kbps). GPU ful
 - Embed on every page, top-left, links to greeningofstreaming.org
 - Current dark theme (#0a0a0a bg, #00ff99 accent) — keep
 - Add sans-serif (Inter/system-ui) for explanatory text in demo mode
+
+## Current Network Status (temporary — revert when BouyguesBox restored)
+- BouyguesBox is DOWN — ISP outage
+- GoS1 plugged into Nighthawk via neighbour's SFR WiFi
+- Tailscale installed and running on GoS1 and MacBook
+- Attempting Tailscale Funnel to expose WattLab externally
+- P110 may have new IP — check with: ping 192.168.1.159
+- When BouyguesBox restored: plug GoS1 back into BouyguesBox, disable funnel, verify P110 IP
+
+## Tailscale Funnel Setup (in progress)
+- Admin console: https://login.tailscale.com/admin/dns → enable HTTPS
+- Command: sudo tailscale funnel 8000
+- Force cert: sudo tailscale cert $(tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['Self']['DNSName'].rstrip('.'))")
+- Check status: tailscale funnel status
