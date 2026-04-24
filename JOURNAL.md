@@ -72,12 +72,31 @@ Demo feedback surfaced a request: CPU + GPU temperatures alongside the P110 watt
 - `_FOOTER` gained a subtle "Spotted a bug or have a feature request? Open an issue on GitHub →" line — visible on every page that includes the footer.
 - `/methodology` gained a visible "Source on GitHub" + "Report an issue" pair of links near the top of the content, in addition to the existing footer mention. GitHub repo is the canonical feedback channel.
 
+#### Queue pause flag for external tools
+A companion experiment at `/home/gos/claude-local-router/` runs Ollama-backed local models (`qwen2.5-coder:14b` now, was `gemma3:12b` originally) that compete with WattLab's SDXL-Turbo image jobs for the 12 GB VRAM. Per the spec at `OWL_INTEGRATION_PROPOSAL.md` in that repo: a coarse file-flag `/tmp/owl-paused` gates the queue worker between jobs without killing the service.
+
+- `queue_worker` checks `Path(PAUSE_FLAG).exists()` before each `pop(0)`. In-flight jobs are untouched — only between-jobs transitions are gated. `queue_event` semantics unchanged so enqueues-during-pause wake the worker correctly when the flag clears.
+- `/queue` JSON grew a `"paused"` key; `/queue-status` renders an amber banner when paused.
+- Mitigation for the "forgotten flag → silent wedge" failure mode: `/live` also surfaces `paused`, and `_LIVE_JS`'s FMT table renders a `⏸ paused` pill in the floating badge on *every* page. So a user who runs a video job while paused sees the reason immediately without having to navigate to `/queue-status`.
+- Router side already handles flag lifecycle (`touch` on launch, `trap EXIT rm -f` on exit).
+
+#### WattLab owl logo
+Commissioned a project mark (geometric owl, teal/green palette adjacent to the GoS `#00ff99` accent but not identical — the org mark and project mark coexist rather than compete).
+
+- SVG at `wattlab_service/static/owl.svg` (2.4 KB).
+- FastAPI `StaticFiles` mount at `/static`; gate middleware whitelists `/static/*` so the favicon loads on the `/gate` login page before the user has authenticated.
+- Favicon swapped on all 10 pages from the Wix-hosted GoS PNG to the local owl SVG. Browser tabs now read as WattLab.
+- `_BACK` upgraded from a bare "← Home" text link to `[owl] WattLab ← Home` — one change, propagates to every test / settings / methodology page.
+- Home page gets a 72 px owl + wordmark block above the big live watts display.
+- Footer `_LOGO` retains the GoS mark. Org credit stays on every page.
+
 ### Files touched
 - `wattlab_service/power.py` — `read_sensors_dict()` helper
 - `wattlab_service/llm.py` — Gemma 3 12B added to `MODELS`
 - `wattlab_service/rag.py` — Gemma 3 12B added to `MODELS`; pre-existing Phi-4 entry kept
 - `wattlab_service/image_gen.py` — `IMAGE_MODELS` registry; `model_key`, `steps_override`, `batch_override` params; `run_image_compare_models_measurement`; `_analyse_models`; VRAM cleanup in `finally`
-- `wattlab_service/main.py` — `/image/start` accepts `model_key` + `compare_models` device; model picker + Compare Models button + `renderCompareModels()` on `/image`; progressive-disclosure collapsibles on `/image`, `/video`, `/llm`, `/rag`; methodology rewrite + home links; `/live` endpoint + `sensors_poller`; `_LIVE_JS` shared poller; badge + home page live hooks; `_ISSUES_LINK` in `_FOOTER`; methodology GitHub links
+- `wattlab_service/main.py` — `/image/start` accepts `model_key` + `compare_models` device; model picker + Compare Models button + `renderCompareModels()` on `/image`; progressive-disclosure collapsibles on `/image`, `/video`, `/llm`, `/rag`; methodology rewrite + home links; `/live` endpoint + `sensors_poller`; `_LIVE_JS` shared poller; badge + home page live hooks; `_ISSUES_LINK` in `_FOOTER`; methodology GitHub links; `PAUSE_FLAG` queue gate + banner + live pill; `StaticFiles` mount + owl favicon + `_BACK` wordmark + home hero
+- `wattlab_service/static/owl.svg` — new project mark (2.4 KB)
 - `wattlab_service/persist.py` — `compare_models` branch in `_summarise`
 - `CLAUDE.md` — session 14 entry, deferred list tidied
 - `JOURNAL.md` — this entry

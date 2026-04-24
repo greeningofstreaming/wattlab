@@ -6,6 +6,8 @@ Built by [Greening of Streaming](https://greeningofstreaming.org), a French NGO 
 
 **Live instance:** [wattlab.greeningofstreaming.org](https://wattlab.greeningofstreaming.org)
 
+**Current release:** `v1.2.0` · [Report an issue or feature request](https://github.com/greeningofstreaming/wattlab/issues)
+
 ---
 
 ## What it measures
