@@ -3671,12 +3671,16 @@ async function showPrevLLM() {{
   try {{
     const resp = await fetch('/results/llm/list');
     const list = await resp.json();
-    if (!list || list.length === 0) {{
+    // RAG results persist under results/llm/ too; exclude them so the LLM
+    // step doesn't try to render a rag_compare result it can't parse
+    // (mirrors showPrevRAG's filter-in pattern).
+    const llmRuns = (list || []).filter(r => !(r.task || '').startsWith('RAG'));
+    if (!llmRuns.length) {{
       document.getElementById('llm-status').innerHTML = '';
       document.getElementById('llm-btns').style.display = 'flex';
       return;
     }}
-    const meta = list[0];
+    const meta = llmRuns[0];
     const r2 = await fetch('/results/llm/' + meta.job_id + '/download.json');
     const full = await r2.json();
     llmResult = full;
