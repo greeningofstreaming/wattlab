@@ -59,11 +59,25 @@ Worth revisiting if visitor feedback says the collapsed default is too hidden.
 - **Rewrote** "Transcoding quality equivalence" open question to reflect ABR progress (bitrate now controlled; GOP/profile still TBD).
 - Added matching `← Home` links top and bottom of content (`.home-link` class — same style as the `_BACK` link on other pages).
 
+#### Live telemetry — modular refactor
+Demo feedback surfaced a request: CPU + GPU temperatures alongside the P110 wattage, updated live. Done in a way that makes adding future live metrics a one-line change.
+
+- `power.py` gained `read_sensors_dict()` — single subprocess read of `sensors -j`, returns `{cpu_tctl, gpu_junction, gpu_ppt_w}`.
+- `main.py` extended `_power_cache` with the sensor keys + queue depth. Two background tasks populate it: `power_poller` at 5s (P110 rate-limit) and `sensors_poller` at 2s (subprocess is cheap, temp changes matter during workloads).
+- New `/live` endpoint bundles everything into one JSON fetch. `/power` kept for backwards compatibility — multiple pages still read it during active measurements.
+- `_LIVE_JS` shared JS block polls `/live` every 3s and updates any DOM element carrying `data-live="<key>"`. Formatters live in a single `FMT` table: adding a new metric is one cache key + one FMT entry.
+- Floating badge (bottom-right, every page) now shows `watts · CPU °C · GPU °C · queue depth`. Home page gets a 3-cell row under the big watts display: CPU Tctl / GPU junction / GPU PPT. Both use the same declarative `data-live` hooks — no bespoke JS per page.
+
+#### "Report an issue" link
+- `_FOOTER` gained a subtle "Spotted a bug or have a feature request? Open an issue on GitHub →" line — visible on every page that includes the footer.
+- `/methodology` gained a visible "Source on GitHub" + "Report an issue" pair of links near the top of the content, in addition to the existing footer mention. GitHub repo is the canonical feedback channel.
+
 ### Files touched
+- `wattlab_service/power.py` — `read_sensors_dict()` helper
 - `wattlab_service/llm.py` — Gemma 3 12B added to `MODELS`
 - `wattlab_service/rag.py` — Gemma 3 12B added to `MODELS`; pre-existing Phi-4 entry kept
 - `wattlab_service/image_gen.py` — `IMAGE_MODELS` registry; `model_key`, `steps_override`, `batch_override` params; `run_image_compare_models_measurement`; `_analyse_models`; VRAM cleanup in `finally`
-- `wattlab_service/main.py` — `/image/start` accepts `model_key` + `compare_models` device; model picker + Compare Models button + `renderCompareModels()` on `/image`; progressive-disclosure collapsibles on `/image`, `/video`, `/llm`, `/rag`; methodology rewrite + home links
+- `wattlab_service/main.py` — `/image/start` accepts `model_key` + `compare_models` device; model picker + Compare Models button + `renderCompareModels()` on `/image`; progressive-disclosure collapsibles on `/image`, `/video`, `/llm`, `/rag`; methodology rewrite + home links; `/live` endpoint + `sensors_poller`; `_LIVE_JS` shared poller; badge + home page live hooks; `_ISSUES_LINK` in `_FOOTER`; methodology GitHub links
 - `wattlab_service/persist.py` — `compare_models` branch in `_summarise`
 - `CLAUDE.md` — session 14 entry, deferred list tidied
 - `JOURNAL.md` — this entry

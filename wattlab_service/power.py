@@ -1,7 +1,8 @@
 """
-power.py — pluggable power measurement interface for WattLab.
+power.py — pluggable power + telemetry interface for WattLab.
 
-Currently backed by a Tapo P110 smart plug polled via local Wi-Fi API.
+Currently backed by a Tapo P110 smart plug polled via local Wi-Fi API
+(wall power) plus lm-sensors (CPU + GPU temperatures and GPU PPT).
 
 To swap in a different power source (PDU, IPMI, another smart plug brand):
   replace get_power_watts() — keep the same signature and return type.
@@ -10,6 +11,8 @@ To swap in a different power source (PDU, IPMI, another smart plug brand):
 """
 
 import asyncio
+import json
+import subprocess
 from dotenv import dotenv_values
 from tapo import ApiClient
 
@@ -28,3 +31,24 @@ async def get_power_watts() -> float:
             if attempt == 2:
                 raise
             await asyncio.sleep(1)
+
+
+def read_sensors_dict() -> dict:
+    """One-shot read of lm-sensors: CPU Tctl, GPU junction temp, GPU PPT (W).
+    Returns None for any value that can't be parsed. Safe to call frequently
+    (subprocess is ~10ms). Used by both live UI telemetry and per-measurement
+    modules (which have their own read_sensors wrappers for historical reasons).
+    """
+    try:
+        result = subprocess.run(['sensors', '-j'], capture_output=True, text=True)
+        data = json.loads(result.stdout)
+        cpu = data.get('k10temp-pci-00c3', {}).get('Tctl', {}).get('temp1_input')
+        gpu_junc = data.get('amdgpu-pci-0300', {}).get('junction', {}).get('temp2_input')
+        gpu_ppt = data.get('amdgpu-pci-0300', {}).get('PPT', {}).get('power1_average')
+        return {
+            "cpu_tctl": cpu,
+            "gpu_junction": gpu_junc,
+            "gpu_ppt_w": gpu_ppt,
+        }
+    except Exception:
+        return {"cpu_tctl": None, "gpu_junction": None, "gpu_ppt_w": None}

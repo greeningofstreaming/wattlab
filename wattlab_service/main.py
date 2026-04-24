@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from dotenv import dotenv_values
-from power import get_power_watts
+from power import get_power_watts, read_sensors_dict
 from video import run_video_measurement, run_both_measurement, run_all_measurement, run_video_measurement_path, run_both_measurement_path, UPLOAD_DIR, LOCK_FILE
 from sources import get_all_sources, PRELOADED
 from llm import run_llm_measurement, run_llm_batch_measurement, run_llm_both_measurement, MODELS, TASKS
@@ -80,10 +80,20 @@ async def gate_submit(request: Request, password: str = Form(...), next: str = F
     return RedirectResponse(url=f"/gate?next={next}&error=1", status_code=302)
 jobs = {}
 
-# --- Power cache ---
-# Single background loop updates this every 5s. All /power reads come from here,
-# so multiple browser sessions don't each independently hammer the P110.
-_power_cache: dict = {"watts": None}
+# --- Live telemetry cache ---
+# Two background loops populate this. All /power, /live, and the live-polling
+# UI read from here, so multiple browser sessions don't each hammer the P110
+# or shell-out to `sensors` independently.
+#   watts         — Tapo P110 wall-power, polled every 5s
+#   cpu_tctl      — Ryzen Tctl (°C), polled every 2s
+#   gpu_junction  — RX 7800 XT junction temp (°C), polled every 2s
+#   gpu_ppt_w     — GPU self-reported Package Power Tracking (W), polled every 2s
+_power_cache: dict = {
+    "watts": None,
+    "cpu_tctl": None,
+    "gpu_junction": None,
+    "gpu_ppt_w": None,
+}
 
 async def power_poller():
     while True:
@@ -92,6 +102,18 @@ async def power_poller():
         except Exception:
             pass  # keep stale value on transient errors
         await asyncio.sleep(5)
+
+async def sensors_poller():
+    """Cheap subprocess call into lm-sensors; 2s cadence so temperature changes
+    during a workload are visible in near-real-time on the live badge."""
+    loop = asyncio.get_event_loop()
+    while True:
+        try:
+            d = await loop.run_in_executor(None, read_sensors_dict)
+            _power_cache.update(d)
+        except Exception:
+            pass
+        await asyncio.sleep(2)
 
 # --- Queue ---
 pending_queue = []          # list of {"job_id", "type", "label", "coro_fn"}
@@ -116,6 +138,7 @@ def enqueue(job_id: str, job_type: str, label: str, coro_fn):
 async def startup():
     asyncio.create_task(queue_worker())
     asyncio.create_task(power_poller())
+    asyncio.create_task(sensors_poller())
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, rag_module.check_index)
 
@@ -155,26 +178,65 @@ _LOGO = (
     f'greeningofstreaming.org</span></a>'
 )
 _BACK = '<a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Home</a>'
+
+# GitHub issue tracker — used by the footer "Report an issue" link and on
+# the methodology page so viewers / collaborators can raise bugs or requests.
+GITHUB_ISSUES_URL = "https://github.com/greeningofstreaming/wattlab/issues"
+
+# Floating badge: shows watts + CPU + GPU temps + queue depth on every page.
+# Values are filled in by the shared _LIVE_JS poller below via data-live hooks.
 _QUEUE_BADGE = (
     '<div id="gos-qbadge" style="position:fixed;bottom:1rem;right:1rem;'
     'font-family:monospace;font-size:0.72rem;background:#111;border:1px solid #1a1a1a;'
-    'padding:0.3rem 0.6rem">'
-    '<a href="/queue-status" style="color:#555;text-decoration:none">'
-    '<span id="gos-qw">— W</span><span id="gos-qd"></span></a></div>'
-    '<script>(function(){'
-    'async function qp(){'
-    'try{'
-    'var q=await(await fetch("/queue")).json();'
-    'var p=await(await fetch("/power")).json();'
-    'var wd=document.getElementById("gos-qw");'
-    'var qd=document.getElementById("gos-qd");'
-    'if(wd)wd.textContent=p.watts.toFixed(1)+" W";'
-    'if(qd)qd.textContent=q.depth>0?" · ⏱ "+q.depth+(q.depth===1?" job":" jobs"):"";'
-    '}catch(e){}'
-    'setTimeout(qp,10000);}'
-    'qp();})();' + '</script>'
+    'padding:0.3rem 0.6rem;max-width:calc(100vw - 2rem)">'
+    '<a href="/queue-status" style="color:#555;text-decoration:none;white-space:nowrap">'
+    '<span data-live="watts">—</span>'
+    ' · CPU <span data-live="cpu_tctl">—</span>'
+    ' · GPU <span data-live="gpu_junction">—</span>'
+    '<span data-live="queue_depth"></span>'
+    '</a></div>'
 )
-_FOOTER = f'<footer style="margin-top:3rem;padding-top:1rem;border-top:1px solid #111">{_LOGO}</footer>' + _QUEUE_BADGE
+
+# Shared live-telemetry poller. One /live fetch every 3s updates every
+# element on the page that carries a data-live="<key>" attribute. Add new
+# keys to the FMT table below. Formatters hide the value by emitting an
+# empty string when appropriate (e.g. queue depth of 0).
+_LIVE_JS = (
+    '<script>(function(){'
+    'var FMT={'
+    'watts:function(v){return (v==null?"—":v.toFixed(1))+" W";},'
+    'cpu_tctl:function(v){return (v==null?"—":Math.round(v))+"°C";},'
+    'gpu_junction:function(v){return (v==null?"—":Math.round(v))+"°C";},'
+    'gpu_ppt_w:function(v){return (v==null?"—":Math.round(v))+" W";},'
+    'queue_depth:function(v){return !v?"":" · ⏱ "+v+(v===1?" job":" jobs");}'
+    '};'
+    'async function tick(){'
+    'try{'
+    'var d=await(await fetch("/live")).json();'
+    'document.querySelectorAll("[data-live]").forEach(function(el){'
+    'var k=el.getAttribute("data-live");var f=FMT[k];'
+    'if(f)el.textContent=f(d[k]);'
+    '});'
+    '}catch(e){}'
+    'setTimeout(tick,3000);'
+    '}tick();'
+    '})();</script>'
+)
+
+# "Report an issue" link in every page footer — points to GitHub issue tracker.
+_ISSUES_LINK = (
+    '<div style="margin-top:0.75rem;font-family:monospace;font-size:0.72rem;color:#333">'
+    'Spotted a bug or have a feature request? '
+    f'<a href="{GITHUB_ISSUES_URL}" target="_blank" rel="noopener" '
+    'style="color:#555;text-decoration:none;border-bottom:1px solid #222">'
+    'Open an issue on GitHub &rarr;</a></div>'
+)
+
+_FOOTER = (
+    f'<footer style="margin-top:3rem;padding-top:1rem;border-top:1px solid #111">'
+    f'{_LOGO}{_ISSUES_LINK}</footer>'
+    f'{_QUEUE_BADGE}{_LIVE_JS}'
+)
 
 # Confidence flag popover — inject into any page that shows .conf-badge elements.
 # Plain string (not f-string) so JS curly braces need no escaping.
@@ -274,7 +336,6 @@ async def index():
 <head>
     <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
   <title>WattLab — GoS</title>
-    <meta http-equiv="refresh" content="10">
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{ font-family: monospace; background: #0a0a0a; color: #e0e0e0;
@@ -283,6 +344,11 @@ async def index():
         .watts {{ font-size: 6rem; color: #00ff99; font-weight: bold; }}
         .label {{ font-size: 1.2rem; color: #888; margin-top: 1rem; }}
         .scope {{ font-size: 0.8rem; color: #444; margin-top: 0.5rem; }}
+        .temps {{ margin-top: 1.25rem; display: flex; gap: 1.5rem;
+                  font-size: 0.95rem; color: #888; }}
+        .temps .t-val {{ color: #ccc; font-weight: bold; }}
+        .temps .t-lbl {{ color: #555; font-size: 0.7rem; letter-spacing: 0.05em;
+                         text-transform: uppercase; display: block; margin-top: 0.2rem; }}
         .nav {{ margin-top: 3rem; display: flex; flex-direction: column; align-items: center;
                 gap: 1.25rem; width: 100%; max-width: 600px; }}
         .nav-label {{ font-size: 0.65rem; color: #333; letter-spacing: 0.1em;
@@ -308,9 +374,23 @@ async def index():
     </style>
 </head>
 <body>
-    <div class="watts">{watts_str} W</div>
-    <div class="label">GoS1 current power draw</div>
-    <div class="scope">Device layer only · Tapo P110 · refreshes every 10s</div>
+    <div class="watts"><span data-live="watts">{watts_str} W</span></div>
+    <div class="label">GoS1 live telemetry</div>
+    <div class="scope">Device layer only · Tapo P110 + lm-sensors · updates every 3s</div>
+    <div class="temps">
+        <div>
+            <span class="t-val" data-live="cpu_tctl">—</span>
+            <span class="t-lbl">CPU Tctl</span>
+        </div>
+        <div>
+            <span class="t-val" data-live="gpu_junction">—</span>
+            <span class="t-lbl">GPU junction</span>
+        </div>
+        <div>
+            <span class="t-val" data-live="gpu_ppt_w">—</span>
+            <span class="t-lbl">GPU PPT</span>
+        </div>
+    </div>
     <div class="nav">
         <div class="nav-tour"><a href="/demo">◆ Guided Tour</a></div>
         <div class="nav-video"><a href="/video">▶ Video transcode</a></div>
@@ -333,6 +413,20 @@ async def index():
 @app.get("/power")
 async def power_json():
     return {"watts": _power_cache["watts"], "scope": "device_only", "source": "tapo_p110"}
+
+
+@app.get("/live")
+async def live_json():
+    """Bundled live telemetry for the shared UI poller. One round-trip for
+    everything that updates in real-time on any page: watts, temps, GPU PPT,
+    queue depth. Values may be None if a source is temporarily unavailable."""
+    return {
+        "watts":        _power_cache["watts"],
+        "cpu_tctl":     _power_cache["cpu_tctl"],
+        "gpu_junction": _power_cache["gpu_junction"],
+        "gpu_ppt_w":    _power_cache["gpu_ppt_w"],
+        "queue_depth":  len(pending_queue) + (1 if current_job_id else 0),
+    }
 
 # --- Video page ---
 
@@ -5090,6 +5184,17 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
 
   <h1>Measurement Methodology</h1>
   <p class="subtitle">How WattLab measures the energy cost of compute tasks &mdash; and what it doesn&rsquo;t measure.</p>
+
+  <div style="margin: -18px 0 32px; font-family: var(--mono); font-size: 12px; display: flex; gap: 18px; flex-wrap: wrap;">
+    <a href="https://github.com/greeningofstreaming/wattlab" target="_blank" rel="noopener"
+       style="color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(0,255,153,0.3);">
+      Source on GitHub &rarr;
+    </a>
+    <a href="https://github.com/greeningofstreaming/wattlab/issues" target="_blank" rel="noopener"
+       style="color: var(--warning); text-decoration: none; border-bottom: 1px solid rgba(255,170,0,0.3);">
+      Report an issue / feature request &rarr;
+    </a>
+  </div>
 
   <div class="section-nav">
     <a href="#scope">Scope</a>
