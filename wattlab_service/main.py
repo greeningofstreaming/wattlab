@@ -121,6 +121,13 @@ queue_event = asyncio.Event()
 current_job_id = None       # job currently executing
 MAX_QUEUE_DEPTH = 8         # total queued + running; 429 beyond this
 
+# External pause: when this file exists, queue_worker waits between jobs
+# rather than picking up the next one. In-flight jobs are unaffected.
+# Created/removed by external tools (e.g. the local-model router at
+# /home/gos/claude-local-router which holds the GPU during its session).
+# See OWL_INTEGRATION_PROPOSAL.md in that repo for the full rationale.
+PAUSE_FLAG = "/tmp/owl-paused"
+
 
 def enqueue(job_id: str, job_type: str, label: str, coro_fn):
     """Add a job to the FIFO queue. Returns 1-based position, or None if queue is full."""
@@ -149,6 +156,13 @@ async def queue_worker():
         await queue_event.wait()
         queue_event.clear()
         while pending_queue:
+            # External pause: tools can touch PAUSE_FLAG to block the worker
+            # between jobs without killing it. In-flight jobs are unaffected.
+            # See OWL_INTEGRATION_PROPOSAL.md for the full design.
+            while Path(PAUSE_FLAG).exists() and pending_queue:
+                await asyncio.sleep(1)
+            if not pending_queue:
+                break
             entry = pending_queue.pop(0)
             job_id = entry["job_id"]
             current_job_id = job_id
@@ -194,6 +208,7 @@ _QUEUE_BADGE = (
     ' · CPU <span data-live="cpu_tctl">—</span>'
     ' · GPU <span data-live="gpu_junction">—</span>'
     '<span data-live="queue_depth"></span>'
+    '<span data-live="paused"></span>'
     '</a></div>'
 )
 
@@ -208,7 +223,8 @@ _LIVE_JS = (
     'cpu_tctl:function(v){return (v==null?"—":Math.round(v))+"°C";},'
     'gpu_junction:function(v){return (v==null?"—":Math.round(v))+"°C";},'
     'gpu_ppt_w:function(v){return (v==null?"—":Math.round(v))+" W";},'
-    'queue_depth:function(v){return !v?"":" · ⏱ "+v+(v===1?" job":" jobs");}'
+    'queue_depth:function(v){return !v?"":" · ⏱ "+v+(v===1?" job":" jobs");},'
+    'paused:function(v){return v?" · ⏸ paused":"";}'
     '};'
     'async function tick(){'
     'try{'
@@ -419,13 +435,15 @@ async def power_json():
 async def live_json():
     """Bundled live telemetry for the shared UI poller. One round-trip for
     everything that updates in real-time on any page: watts, temps, GPU PPT,
-    queue depth. Values may be None if a source is temporarily unavailable."""
+    queue depth, pause state. Values may be None if a source is temporarily
+    unavailable."""
     return {
         "watts":        _power_cache["watts"],
         "cpu_tctl":     _power_cache["cpu_tctl"],
         "gpu_junction": _power_cache["gpu_junction"],
         "gpu_ppt_w":    _power_cache["gpu_ppt_w"],
         "queue_depth":  len(pending_queue) + (1 if current_job_id else 0),
+        "paused":       Path(PAUSE_FLAG).exists(),
     }
 
 # --- Video page ---
@@ -2160,6 +2178,7 @@ async def queue_status_endpoint():
         "depth": len(pending_queue) + (1 if current_job_id else 0),
         "running": running,
         "pending": pending_info,
+        "paused": Path(PAUSE_FLAG).exists(),
     }
 
 
@@ -4810,6 +4829,7 @@ async def queue_page():
     <a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Home</a>
     <h1>Queue</h1>
     <div class="sub">Auto-refreshes every 4s</div>
+    <div id="pause-banner"></div>
     <div id="content"><p class="empty">Loading…</p></div>
 <script>
 function resumeLink(type, jobId) {
@@ -4820,6 +4840,14 @@ function resumeLink(type, jobId) {
 async function load() {
     const r = await fetch('/queue');
     const q = await r.json();
+    const banner = document.getElementById('pause-banner');
+    banner.innerHTML = q.paused
+        ? '<div style="background:#442200;color:#ffaa00;padding:0.75rem 1rem;'
+        + 'margin-bottom:1rem;font-size:0.85rem;border:1px solid #ffaa00">'
+        + '⏸ Queue paused — new jobs will wait until <code>/tmp/owl-paused</code>'
+        + ' is removed. Running job (if any) continues normally.'
+        + '</div>'
+        : '';
     const el = document.getElementById('content');
     if (q.depth === 0) {
         el.innerHTML = '<div class="depth">0</div><div class="depth-lbl">jobs in queue — GoS1 is idle</div>';
