@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import dotenv_values
 from power import get_power_watts, read_sensors_dict
 from video import run_video_measurement, run_both_measurement, run_all_measurement, run_video_measurement_path, run_both_measurement_path, UPLOAD_DIR, LOCK_FILE
@@ -21,11 +22,19 @@ import settings as cfg
 config = dotenv_values("/home/gos/wattlab/.env")
 app = FastAPI()
 
+# Serve bundled assets (owl logo, favicon) from wattlab_service/static/.
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 GATE_PASSWORD = config.get("WATTLAB_GATE_PASSWORD", "")
 
 @app.middleware("http")
 async def gate_middleware(request: Request, call_next):
-    if not GATE_PASSWORD or request.url.path.startswith("/gate"):
+    # /gate is the auth flow itself; /static is public assets (logo, favicon)
+    # — neither needs a cookie, otherwise the gate page can't render its own
+    # favicon before the user has logged in.
+    if (not GATE_PASSWORD
+            or request.url.path.startswith("/gate")
+            or request.url.path.startswith("/static")):
         return await call_next(request)
     if request.cookies.get("wl_auth") == GATE_PASSWORD:
         return await call_next(request)
@@ -39,7 +48,7 @@ async def gate_page(next: str = "/", error: bool = False):
     return f"""<!DOCTYPE html>
 <html>
 <head>
-  <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+  <link rel="icon" type="image/svg+xml" href="/static/owl.svg">
   <title>WattLab</title>
   <style>
     *{{box-sizing:border-box;margin:0;padding:0}}
@@ -191,7 +200,17 @@ _LOGO = (
     f'<span style="color:#444;font-size:0.72rem;font-family:monospace">'
     f'greeningofstreaming.org</span></a>'
 )
-_BACK = '<a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Home</a>'
+_BACK = (
+    '<a href="/" style="display:inline-flex;align-items:center;gap:0.55rem;'
+    'color:#777;text-decoration:none;font-size:0.82rem;margin-bottom:1.5rem;'
+    'transition:color 0.2s" onmouseover="this.style.color=\'#00ff99\'"'
+    ' onmouseout="this.style.color=\'#777\'">'
+    '<img src="/static/owl.svg" alt="WattLab" '
+    'style="height:26px;width:26px;display:block;flex-shrink:0">'
+    '<span style="font-weight:bold;letter-spacing:0.02em">WattLab</span>'
+    '<span style="color:#333;margin-left:0.35rem">&nbsp;&nbsp;&larr; Home</span>'
+    '</a>'
+)
 
 # GitHub issue tracker — used by the footer "Report an issue" link and on
 # the methodology page so viewers / collaborators can raise bugs or requests.
@@ -350,13 +369,20 @@ async def index():
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+    <link rel="icon" type="image/svg+xml" href="/static/owl.svg">
   <title>WattLab — GoS</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{ font-family: monospace; background: #0a0a0a; color: #e0e0e0;
                display: flex; flex-direction: column; align-items: center;
                justify-content: center; min-height: 100vh; padding: 2rem 1rem; }}
+        .hero-mark {{ display: flex; align-items: center; gap: 0.75rem;
+                      margin-bottom: 1.5rem; }}
+        .hero-mark img {{ height: 72px; width: 72px; display: block; }}
+        .hero-mark .name {{ font-size: 1.4rem; color: #00ff99;
+                            font-weight: bold; letter-spacing: 0.05em; }}
+        .hero-mark .tagline {{ display: block; color: #444; font-size: 0.72rem;
+                               letter-spacing: 0.04em; margin-top: 0.15rem; }}
         .watts {{ font-size: 6rem; color: #00ff99; font-weight: bold; }}
         .label {{ font-size: 1.2rem; color: #888; margin-top: 1rem; }}
         .scope {{ font-size: 0.8rem; color: #444; margin-top: 0.5rem; }}
@@ -390,6 +416,13 @@ async def index():
     </style>
 </head>
 <body>
+    <div class="hero-mark">
+        <img src="/static/owl.svg" alt="WattLab owl">
+        <div>
+            <div class="name">WattLab</div>
+            <span class="tagline">Online WattLab · GoS1</span>
+        </div>
+    </div>
     <div class="watts"><span data-live="watts">{watts_str} W</span></div>
     <div class="label">GoS1 live telemetry</div>
     <div class="scope">Device layer only · Tapo P110 + lm-sensors · updates every 3s</div>
@@ -461,7 +494,7 @@ async def video_page(request: Request):
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+    <link rel="icon" type="image/svg+xml" href="/static/owl.svg">
   <title>WattLab — Video Test</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -1406,7 +1439,7 @@ async def llm_page():
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+    <link rel="icon" type="image/svg+xml" href="/static/owl.svg">
   <title>WattLab — LLM Inference Test</title>
     <style>
         * {{ box-sizing:border-box; margin:0; padding:0; }}
@@ -2204,7 +2237,7 @@ async def rag_page():
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+    <link rel="icon" type="image/svg+xml" href="/static/owl.svg">
   <title>WattLab — RAG Energy Test</title>
     <style>
         * {{ box-sizing:border-box; margin:0; padding:0; }}
@@ -2952,7 +2985,7 @@ async def settings_page(request: Request):
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+    <link rel="icon" type="image/svg+xml" href="/static/owl.svg">
   <title>WattLab — Settings</title>
     <style>
         * {{ box-sizing:border-box; margin:0; padding:0; }}
@@ -3090,7 +3123,7 @@ async def settings_save(request: Request, data: dict):
 _DEMO_HTML = f"""<!DOCTYPE html>
 <html>
 <head>
-<link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+<link rel="icon" type="image/svg+xml" href="/static/owl.svg">
 <title>WattLab — Guided Tour · Greening of Streaming</title>
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
@@ -4336,7 +4369,7 @@ async def image_page():
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+    <link rel="icon" type="image/svg+xml" href="/static/owl.svg">
   <title>WattLab — Image Generation Test</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -4799,7 +4832,7 @@ async def queue_page():
     return """<!DOCTYPE html>
 <html>
 <head>
-    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+    <link rel="icon" type="image/svg+xml" href="/static/owl.svg">
   <title>WattLab — Queue</title>
     <meta http-equiv="refresh" content="4">
     <style>
@@ -4888,7 +4921,7 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" type="image/png" href="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png">
+<link rel="icon" type="image/svg+xml" href="/static/owl.svg">
 <title>WattLab — Methodology</title>
 <style>
   :root {

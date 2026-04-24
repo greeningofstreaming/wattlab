@@ -1,0 +1,59 @@
+<svg width="400" height="400" viewBox="0 0 400 400" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>OWL – Online WattLab icon</title>
+  <desc>Geometric owl icon in Greening of Streaming teal/green palette</desc>
+
+  <!-- Body -->
+  <ellipse fill="#1D9E75" cx="200" cy="255" rx="105" ry="125"/>
+
+  <!-- Ear tufts -->
+  <polygon fill="#0F6E56" points="118,165 135,120 152,165"/>
+  <polygon fill="#0F6E56" points="248,165 265,120 282,165"/>
+
+  <!-- Wings -->
+  <ellipse fill="#0F6E56" cx="78" cy="275" rx="48" ry="75" transform="rotate(-12 78 275)"/>
+  <ellipse fill="#0F6E56" cx="322" cy="275" rx="48" ry="75" transform="rotate(12 322 275)"/>
+
+  <!-- Belly -->
+  <ellipse fill="#9FE1CB" cx="200" cy="275" rx="62" ry="80"/>
+
+  <!-- Chest feather marks -->
+  <ellipse fill="#5DCAA5" cx="185" cy="238" rx="10" ry="7"/>
+  <ellipse fill="#5DCAA5" cx="215" cy="238" rx="10" ry="7"/>
+  <ellipse fill="#5DCAA5" cx="170" cy="258" rx="10" ry="7"/>
+  <ellipse fill="#5DCAA5" cx="200" cy="258" rx="10" ry="7"/>
+  <ellipse fill="#5DCAA5" cx="230" cy="258" rx="10" ry="7"/>
+  <ellipse fill="#5DCAA5" cx="185" cy="278" rx="10" ry="7"/>
+  <ellipse fill="#5DCAA5" cx="215" cy="278" rx="10" ry="7"/>
+
+  <!-- Eye sockets -->
+  <circle fill="#085041" cx="168" cy="200" r="40"/>
+  <circle fill="#085041" cx="232" cy="200" r="40"/>
+  <ellipse fill="#085041" cx="200" cy="200" rx="32" ry="38"/>
+
+  <!-- Eye whites -->
+  <circle fill="#E1F5EE" cx="168" cy="200" r="30"/>
+  <circle fill="#E1F5EE" cx="232" cy="200" r="30"/>
+
+  <!-- Pupils -->
+  <circle fill="#04342C" cx="168" cy="202" r="16"/>
+  <circle fill="#04342C" cx="232" cy="202" r="16"/>
+
+  <!-- Highlights -->
+  <circle fill="#E1F5EE" cx="175" cy="194" r="6"/>
+  <circle fill="#E1F5EE" cx="239" cy="194" r="6"/>
+
+  <!-- Beak -->
+  <polygon fill="#FAC775" points="190,222 210,222 200,240"/>
+
+  <!-- Feet -->
+  <rect fill="#EF9F27" x="160" y="368" width="14" height="28" rx="7"/>
+  <rect fill="#EF9F27" x="176" y="368" width="14" height="28" rx="7"/>
+  <rect fill="#EF9F27" x="144" y="368" width="14" height="28" rx="7"/>
+  <rect fill="#EF9F27" x="216" y="368" width="14" height="28" rx="7"/>
+  <rect fill="#EF9F27" x="232" y="368" width="14" height="28" rx="7"/>
+  <rect fill="#EF9F27" x="200" y="368" width="14" height="28" rx="7"/>
+  <!-- Legs -->
+  <rect fill="#EF9F27" x="163" y="352" width="20" height="22" rx="6"/>
+  <rect fill="#EF9F27" x="217" y="352" width="20" height="22" rx="6"/>
+
+</svg>
