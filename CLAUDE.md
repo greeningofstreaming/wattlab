@@ -2,6 +2,7 @@
 # Auto-loaded by Claude Code. Keep this current.
 # Last updated: 2026-04-29 (Session 15)
 # See also: GOS1_INFRA.md — server infrastructure, Nextcloud backup, personal stack context
+# See also: TESTING.md — three-tier testing strategy (Tier 1 smoke / Tier 2 integration / Tier 3 manual)
 
 ## Project Identity
 - **Name:** WattLab
@@ -64,6 +65,7 @@ wattlab/
 ├── README.md
 ├── CLAUDE.md
 ├── JOURNAL.md
+├── TESTING.md                    # three-tier testing strategy
 ├── WATTLAB_SPEC.md               # full product spec
 ├── data_analysis_nov25/          # Nov25 hackathon scripts
 ├── data_cleanup/

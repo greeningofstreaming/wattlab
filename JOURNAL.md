@@ -53,11 +53,15 @@ Demo angle this unlocks: "the GoS REM whitepaper is right here in the index, alo
 #### Stale-box audit
 Tidied three Phase 6 boxes (`CLAUDE.md:173-175`) that were marked `[ ]` despite being completed in session 13: DNS A record, Let's Encrypt SSL, HTTP→HTTPS redirect. Same fix in memory: removed `project_phase6.md` and `project_deferred.md` (the latter pointed to "image elapsed time" which had been silently fixed before being ticked).
 
+#### Testing strategy — `TESTING.md`
+Wrote a three-tier testing strategy doc as the project's first quality plan. Sweet-spot principle: tests get *run* (not avoided), so we deliberately keep the bar low. Tier 1 is a 30-second bash smoke (imports + page 200s + JSON shapes + two pure-function checks); Tier 2 is a 2–5 min integration check (persistence + CSV round-trip, RAG `corpus_list` metadata sync, no full RAG rebuild); Tier 3 is a 5 min manual UI checklist with concrete click-paths for video / LLM / RAG / Guided Tour. Includes a decision matrix ("typo → Tier 1 only; pre-demo → all three") and an explicit "what we're NOT testing and why" section so the bar stays sustainable. Bash skeletons for `scripts/smoke.sh` and `scripts/integration.sh` are embedded inline — implementation deferred until first time we feel friction.
+
 ### Files touched
 - `wattlab_service/main.py` — `_BASE_STYLES` constant + injection via `_FOOTER` and `/gate`; bulk hex → `var(--*)` migration; `_BACK` swap on `/queue-status`; owl logo on `/methodology` topbar; Guided Tour findings refactor (per-section row strings + collapsible AI workloads); RAG `/rag` page polish (Without RAG labels, REM question pre-fill, faithfulness `<details>` callout, dropped `(10s)`); `run_rag_compare_job` cooldown + stage-collision fix; `MODE_LABELS` cooldown row; corpus browser `<details>` panel + `loadCorpus()` JS; `GET /rag/corpus-list` endpoint
 - `wattlab_service/persist.py` — `response` added to LLM CSV fieldnames + `_row` helper
 - `wattlab_service/rag.py` — `corpus_list()` function (cross-references ChromaDB metadata for indexed status)
-- `CLAUDE.md` — Session 15 entry; 8 Deferred items ticked; 4 new Deferred items added with `[LOW]`/`[MID]` priority tags on the two RAG follow-ups; stale Phase 6 trio cleared
+- `TESTING.md` — new file, three-tier testing strategy with bash skeletons
+- `CLAUDE.md` — Session 15 entry; 8 Deferred items ticked; 4 new Deferred items added with `[LOW]`/`[MID]` priority tags on the two RAG follow-ups; stale Phase 6 trio cleared; `TESTING.md` added to See also + Repo Structure
 - `JOURNAL.md` — this entry
 - Memory (`~/.claude/projects/-home-gos-wattlab/memory/`) — removed `project_deferred.md` and `project_phase6.md` (stale)
 
