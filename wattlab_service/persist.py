@@ -73,6 +73,7 @@ def to_csv(job_type: str, data: dict) -> str:
             "output_tokens", "tokens_per_sec",
             "w_base", "w_task", "delta_w", "delta_e_wh", "mwh_per_token",
             "poll_count", "confidence", "cpu_base", "gpu_base",
+            "response",
         ]
         rows = _llm_rows(data)
     writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
@@ -296,6 +297,7 @@ def _llm_rows(data: dict) -> list:
             "poll_count": e.get("poll_count"),
             "confidence": e.get("confidence", {}).get("label"),
             "cpu_base": t.get("cpu_base"), "gpu_base": t.get("gpu_base"),
+            "response": i.get("response", ""),
         }
 
     if mode == "all":

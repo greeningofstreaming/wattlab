@@ -201,6 +201,46 @@ def check_index():
         index_status = "not_built"
 
 
+def corpus_list() -> list[dict]:
+    """List PDFs in the corpus, marking which are indexed.
+
+    Indexed status is derived from the source filenames present in the
+    ChromaDB collection metadata — chunks store {"source": pdf_path.name}
+    so a PDF is "indexed" if its filename appears at least once.
+    """
+    s = cfg.load()
+    corpus_path = Path(s["rag_corpus_path"])
+    indexed = set()
+    try:
+        collection = _get_collection(s["rag_chroma_path"])
+        # Fetch all metadatas; corpus is small (~100 docs, ~5–10k chunks).
+        result = collection.get(limit=200000, include=["metadatas"])
+        for meta in result.get("metadatas") or []:
+            if meta and meta.get("source"):
+                indexed.add(meta["source"])
+    except Exception:
+        pass
+    docs = []
+    if not corpus_path.exists():
+        return docs
+    for pdf_path in sorted(corpus_path.rglob("*.pdf")):
+        try:
+            size_kb = pdf_path.stat().st_size // 1024
+        except Exception:
+            size_kb = 0
+        try:
+            rel = str(pdf_path.relative_to(corpus_path))
+        except ValueError:
+            rel = pdf_path.name
+        docs.append({
+            "name": pdf_path.name,
+            "rel_path": rel,
+            "size_kb": size_kb,
+            "indexed": pdf_path.name in indexed,
+        })
+    return docs
+
+
 async def measure_baseline(polls: int = 10) -> float:
     readings = []
     for _ in range(polls):

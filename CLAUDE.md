@@ -1,6 +1,6 @@
 # WattLab — Claude Code Context File
 # Auto-loaded by Claude Code. Keep this current.
-# Last updated: 2026-04-24 (Session 14)
+# Last updated: 2026-04-29 (Session 15)
 # See also: GOS1_INFRA.md — server infrastructure, Nextcloud backup, personal stack context
 
 ## Project Identity
@@ -170,9 +170,9 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] nginx running on GoS1
 - [x] BouyguesBox: TCP 80+443 → 192.168.1.62
 - [x] Password gate: cookie-based, `WATTLAB_GATE_PASSWORD` in `.env`
-- [ ] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` — DNS table lost during Wix ownership transfer (Dom → Ben). Needs rebuild.
-- [ ] Let's Encrypt SSL: `sudo certbot --nginx -d wattlab.greeningofstreaming.org`
-- [ ] Enable HTTP→HTTPS redirect in nginx config, reload nginx
+- [x] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` — restored 2026-04-10 (session 13)
+- [x] Let's Encrypt SSL: provisioned 2026-04-10 via certbot (session 13)
+- [x] HTTP→HTTPS redirect: handled by certbot at provisioning
 
 ### Phase 7 — Guided Tour & Credibility ✅
 - [x] Demo renamed to Guided Tour (`/demo` URL unchanged)
@@ -266,6 +266,14 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] Settings: three read-only variance calibration output fields (idle/cpu/gpu pct); save-before-run fix; stage labels `run N/M — H.264 CPU encode`; `variance_runs` slider min=2
 - [x] Previous runs: codec displayed (e.g. "H.264 CPU vs H.264 GPU"); `persist.py` both-mode summary adds `cpu_preset`/`gpu_preset`
 
+### Session 15 — Readability pass + visual consistency (2026-04-29) ✅
+- [x] **`_BASE_STYLES` palette** (`main.py:~276`) — single `:root` block defining `--text` / `--text-2..5` / `--accent` / `--bg` / `--panel` / `--border` etc. Plus `body{font-size:14px;line-height:1.55}` and a `@media(max-width:600px)` rule that bumps base + the smallest sub-label sizes on phones. Injected via `_FOOTER` (covers all standard pages) and directly into `/gate`.
+- [x] **620 mechanical hex → CSS-var replacements** across `main.py` (color/background/border-color/`1px solid`). Worst offender `#555` (used 112×, ~3.3:1 contrast on `#0a0a0a`) → `--text-3` = `#8a8a8a` (~6.6:1, WCAG AA). Alpha-channel variants (`#00ff99XX`) intentionally left as literals — they're translucent overlays, semantically distinct from `--accent`.
+- [x] **Owl logo on `/queue-status`** — replaced inline `← Home` with shared `_BACK` (now uses the `""" + _BACK + """` concat pattern, matching how `_FOOTER` is wired in the same page).
+- [x] **Owl logo on `/methodology`** — added owl SVG before the GoS logo in the existing `.topbar` div. Project mark (owl) + org credit (GoS) now visible together on every page.
+- [x] **Guided Tour final-findings step** — refactored `buildSummary` (`main.py:~4223`) so video transcoding is the visual headline (h2 + scope sentence + flat table). LLM / Image / RAG demoted to collapsible `<details>` blocks under an "OTHER WORKLOADS MEASURED" subhead. Reflects the GoS thesis that video is the streaming impact story; AI workloads are interesting but secondary.
+- [x] **Stale Phase 6 boxes ticked** — DNS / SSL / HTTP→HTTPS redirect were all completed in session 13 but the Phase 6 checkboxes were never updated. Audit pass.
+
 ### Deferred
 - [x] DNS: A record `wattlab.greeningofstreaming.org → 176.148.88.254` — restored 2026-04-10
 - [x] SSL: certbot provisioned 2026-04-10. Service now at https://wattlab.greeningofstreaming.org
@@ -273,15 +281,42 @@ LLM: "Device layer only (GoS1 server). Network and CPE excluded. No amortised tr
 - [x] phi4 pull: already present (`phi4:latest`, 9.1GB). Added to RAG `MODELS` registry in session 14.
 - [x] GPU image generation: SD-Turbo + SDXL-Turbo running on ROCm via diffusers (session 14). Compare Models ⚡ gives apples-to-apples size comparison.
 - [x] SDXL-Turbo evaluation — done in session 14, kept at 512×512 (1024 busts VRAM via fp32 VAE upcast on Navi31)
-- [ ] Image page progress bar: add elapsed time (video + LLM already have it)
+- [x] Image page progress bar: elapsed time already wired (`imgStartTime` passed to `wlRenderProgress` at `main.py:~4693`); confirmed in session 15
 - [ ] Confidence multiplier grounding: working session with Tanya — `variance_green_x`/`variance_yellow_x` (5×/2×) currently by judgement; need statistical grounding from calibration run data
 - [ ] Transcoding profile documentation: GOP structure and profile level not yet confirmed apples-to-apples across codecs — bitrate target is now standardised (ABR), but GOP/profile still TBD. Work with Simon/Tanya.
 - [ ] Benchmark 2: representative real-world presets — CRF (CPU) and QP (GPU), codec-appropriate rate control. Benchmark 1 (ABR, current) ensures identical task; Benchmark 2 would show each codec at its natural operating point. Add to WATTLAB_SPEC.md.
 - [ ] main.py refactor: split into routes/, Jinja templates, typed models, tests. Raised in session 8 external audit. Valid technical debt; deferred until post-demo.
 - [ ] Dockerize WattLab service — isolate from future GoS1 projects. Stage 1: FastAPI + VAAPI (`--device /dev/dri`), `--network host`, drop or proxy focus mode via thin host helper socket service. Stage 2 (later, if portability needed): full ROCm image for GPU image gen. Ollama stays as host systemd service, accessed over host network. See conversation 2026-04-10 for full analysis.
 - [ ] Power-user/visitor UX: progressive-disclosure pilot applied to all test pages in session 14; watch to see if collapsed `ⓘ About this test` + `/demo` link suffices, or if a visible density toggle is needed later.
-- [ ] Owl logo missing from `/queue-status` and `/methodology`. `/queue-status` has its own inline `← Home` link rather than using `{_BACK}` (see `main.py:~4865`) — swap for `_BACK` or inline an equivalent owl+wordmark. `/methodology` has its own topbar with the GoS logo + Home link (`main.py:~5079`) — add the owl alongside the GoS mark so the project + org branding is consistent with every other page.
-- [ ] Guided Tour final-findings step: reorder so **video processing** leads (that's the GoS raison d'être), with **LLM / Image Generation / RAG** findings demoted to collapsible `<details>` blocks below. Current layout weights them equally which buries the core story. Find the summary step in `/demo` (probably the last `step-N` block) and restructure — the existing `<details>` pattern used on test pages can be reused here.
+- [x] Owl logo on `/queue-status` and `/methodology` — session 15. Queue page swapped its inline `← Home` for `_BACK` (consistent owl+wordmark with all other pages). Methodology topbar now shows owl + GoS logo side by side (project mark + org credit).
+- [x] Guided Tour final-findings step (session 15): video transcoding now leads as the headline (h2 heading + scope sentence + flat table), with **LLM / Image Generation / RAG** demoted to collapsible `<details>` blocks under an "OTHER WORKLOADS MEASURED" subhead. Refactored `buildSummary` (`main.py:~4223`) to build per-section row strings rather than one flat table.
+- [x] RAG Compare 3 Modes — bugs 1 + 2 fixed in session 15 (2026-04-29):
+  1. **Cooldown added** — `run_rag_compare_job` now does `await asyncio.sleep(s["llm_rest_s"])` between iterations (skipped after the last). During the sleep, `current_mode = "cooldown"` so the UI shows "⏱ Cooling down (heat dissipating)". Reuses existing `llm_rest_s` setting (default 10s) — no new settings field. Resolves the negative-mWh/tok artefact seen with TinyLlama on rag_large.
+  2. **Stage-name collision removed** — outer loop no longer sets `jobs[job_id]["stage"]`; only `current_mode` and `mode_index`. Inner `run_rag_measurement` retains exclusive ownership of `stage`. RAG_STAGE_IDX lookup no longer falls back to 0 between modes.
+  3. *(deferred)* Stage list is still 3-stage in the JS — compare-mode renderer (`renderCompareProgress`) shows mode-level progress with cooldown row, which is sufficient. Per-mode inner stages (baseline poll → inference → done) not surfaced in compare mode. Could revisit if visitors ask for finer progress granularity.
+- [ ] UI contrast pass (session 15, 2026-04-29) — landed: added `_BASE_STYLES` palette + 620 mechanical replacements of literal hex → `var(--*)` for body text/bg/borders. Worth watching: any visual regressions (especially around alpha overlays `#00ff99XX` which were intentionally left as literals), and whether the new mobile font bumps look right at the 600px breakpoint. If so all-good, future readability/contrast tweaks are now one place: edit `--text-3`/`--text-4`/`--text-5` in `_BASE_STYLES` (`main.py:~276`).
+- [x] LLM result CSV: `response` column landed (session 15, 2026-04-29). Added to `fieldnames` in `persist.py` and to `_row` helper inside `_llm_rows`. CSV-quoting handled by `csv.DictWriter` defaults (newlines preserved inside quoted field). Applies to single, batch, both, all, all_both, rag, and rag_compare modes.
+- [x] RAG-compare result JSON: structure confirmed (session 15). For `mode: rag_compare` there's no top-level `inference.response` (no top-level `inference` dict at all) — instead each mode result lives under `results.<mode>.inference.response` and also `results.<mode>.answer`. Both contain the full LLM output. Document this if anyone builds a downstream consumer, but no normalisation needed.
+- [x] Rename "Baseline" → "Without RAG" in the RAG section UI (session 15, 2026-04-29). Display label changed in: `/rag` mode-card, single-mode `ragModeLabels`, compare-mode `MODE_LABELS` (×2), Guided Tour `buildSummary` ragRows. Internal `baseline` mode key kept (no schema break). `persist.py:166` CSV `task` column still shows `RAG/baseline` — kept as-is since CSV is for downstream analysis, not display.
+- [x] RAG corpus document browser landed (session 15, 2026-04-29). New `corpus_list()` in `rag.py` returns `[{name, rel_path, size_kb, indexed}]` — cross-referenced against the ChromaDB collection's source-filename metadata to show indexed vs pending. New `GET /rag/corpus-list` endpoint wraps it with totals. Collapsed `<details>` panel on `/rag` (between index bar and Model section); on first open it sorts pending first, renders a scrollable list with green/amber dots and per-doc size + status, and a footer note explaining how to add docs. Helps visitors see "your REM whitepaper IS in the index" or "you uploaded a PDF, hit Rebuild".
+- [ ] **[MID]** RAG visitor doc upload. New `POST /rag/upload` accepting multipart PDF → save to `corpus/papers/visitor-contributions/` (existing rglob scan picks it up automatically). Gate to authenticated visitors. **Mitigations needed:** file-size cap (e.g. 20 MB); show "submitted by" or upload timestamp in doc list; optional admin-approval queue (upload to staging dir, manual move to active). After upload the file is on disk but not embedded — needs `/rag/build-index?rebuild=true` to take effect, OR (better UX) extend `build_index` for **incremental indexing**: diff corpus against existing collection IDs and only embed new files. Reported by user 2026-04-29.
+- [ ] **[LOW]** RAG corpus — view/open a single PDF. Sibling to the doc browser shipped in session 15 (which only lists files). Each row in the corpus browser could become a link to `GET /rag/corpus-doc/<rel_path>` returning the PDF inline (`Content-Type: application/pdf`, `Content-Disposition: inline`). Path traversal risk — must validate the requested path stays within `Path(s["rag_corpus_path"]).resolve()` before opening. Useful for visitors who want to verify a chunk's source after a RAG run, but not demo-blocking. Reported by user 2026-04-29.
+- [x] RAG demo question (session 15, 2026-04-29): `/rag` textarea placeholder now reads "What is REM (Remote Energy Measurement)?". Corpus-grounded, surfaces the GoS REM whitepaper, and produces the demo-ready faithfulness story (small models hallucinate over correctly-retrieved chunks; large models stay faithful).
+- [x] TinyLlama RAG quality + RAG faithfulness story landed as `/rag` callout (session 15, 2026-04-29). Inline `<details>` block under the question textarea — "ⓘ Why this question, and how to read the answers" — covers (1) why "What is REM?" is a good test (corpus-grounded), (2) the 2026-04-29 finding that all three models retrieve the same correct chunks but only Gemma+Phi-4 stay faithful, and (3) the headline that "RAG retrieval ≠ RAG quality, hallucination is a third axis on the energy/quality tradeoff". Good demo handle. Could later be lifted into Guided Tour Findings step (see below).
+- [x] RAG progress bar label (session 15, 2026-04-29): dropped the hardcoded `(10s)` — now reads just `'Baseline poll'`. Can never go stale regardless of what `baseline_polls` is set to. Compare-mode display also gained a `cooldown` label so the inter-mode rest period is visible.
+- [ ] Factorise page headers + footers for visual consistency. Symptom that surfaced this: `/methodology` shows owl + GoS logo + title left-justified in its own bespoke `.topbar` div (`main.py:~5281`), which doesn't match the visual rhythm of other pages that use the shared `_BACK` snippet (owl + "WattLab ← Home" wordmark on the left, no extra logos in the bar). Methodology + `/queue-status` were both one-offs because they predate the `_BACK`/`_FOOTER` consolidation. Fix: extract a `_HEADER` shared constant (mirroring `_FOOTER`), with optional `title` and `subtitle` slots, and migrate all pages to use it. Drop the bespoke topbar CSS in methodology. Will give a single edit point for header changes the same way `_BASE_STYLES` did for colours. Reported by user 2026-04-29.
+- [ ] Guided Tour Findings step — current `buildSummary` (`main.py:~4223`) only echoes the user's session results back at them, which is anticlimactic. Redesign: aggregate across **all stored results** in `results/{video,llm,image}/*.json` to surface the body-of-evidence learnings (mirror the "Key Findings" structure in this CLAUDE.md). Optionally keep a small "your run today" row at the top so visitors still see their personal numbers, but the headline is the corpus. Reported by user 2026-04-29.
+
+  **Candidate findings to surface (curated 2026-04-29):**
+  - **Video — H.264 ABR:** GPU uses ~55% less energy than CPU (Meridian 120s, n=3, 🟢)
+  - **Video — H.265 ABR:** GPU uses ~81% less energy, ~79% faster than CPU
+  - **Video — AV1 ABR:** GPU uses ~55% less energy than CPU; AV1 CPU outperforms H.265 CPU on speed and energy (SVT-AV1 multi-core advantage)
+  - **Video — VAAPI ceiling:** H.265 GPU and AV1 GPU both encode at exactly 14.5s — hardware clock dominates the GPU path
+  - **LLM — efficiency vs scale:** TinyLlama (1.1B) is ~15× more efficient per token than Mistral 7B — but answers are generic boilerplate (capacity floor)
+  - **LLM — measurement floor:** TinyLlama is too fast for reliable P110 measurement; batched mode required to get above plug noise
+  - **Image — GPU vs CPU:** SD-Turbo on GPU at batch-of-5 substantially outperforms CPU on Wh/image (full numbers from session 14 runs)
+  - **Image — VRAM ceiling:** SDXL-Turbo at 1024×1024 busts the 12 GB Navi31 budget via fp32 VAE upcast; 512×512 is the sweet spot
+  - **RAG — retrieval ≠ quality** ⭐ (NEW, 2026-04-29 from REM runs): all three models (TinyLlama 1.1B, Gemma 3 12B, Phi-4 14B) retrieved **identical correct chunks** for "What is REM?" — top sources were the GoS REM whitepapers in both cases. But TinyLlama hallucinated "REM is a framework provided by the European Commission", blending the GoS source with an adjacent JRC sustainability framework chunk. Gemma and Phi-4 stayed faithful. **The headline insight:** RAG retrieval works at small scale, but RAG *quality* depends on the consuming model's faithfulness to source. Hallucination rate is a third axis on the energy/quality tradeoff. Strongest GoS-relevant RAG demo finding to date — surface this prominently.
 
 ## Key Findings to Date
 

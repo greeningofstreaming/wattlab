@@ -7,6 +7,68 @@ Scope: device layer only (GoS1). Network, CDN, and CPE explicitly excluded.
 
 ---
 
+## Session 15 — 2026-04-29
+
+### What we did
+
+**Readability + visual consistency pass · RAG bug fixes · RAG polish · Corpus doc browser · Demo prep for 2026-04-30**
+
+#### `_BASE_STYLES` — single source of truth for content colours
+The site shipped with 396 inline `color:#xxx` declarations across `main.py`, dominated by `#555` (used 112×, ~3.3:1 contrast on `#0a0a0a` — fails WCAG AA). User feedback flagged grey-on-black as hard to read on mobile. Fixed in two passes:
+
+1. Added `_BASE_STYLES` constant (`main.py:~276`) — a single `<style>` block defining `:root` CSS variables for all content colours (`--text` / `--text-2..5`), accents (`--accent` / `--warn` / `--err`), backgrounds (`--bg` / `--panel`), and borders. Plus base body sizing and a `@media (max-width:600px)` block that bumps the smallest sub-label fonts on phones. Injected via `_FOOTER` (covers all standard pages) and directly into the `/gate` page.
+2. Bulk migration via Python regex script: 620 mechanical replacements of `color:#xxx`, `background:#xxx`, `border-color:#xxx`, and `1px solid #xxx` literals → `var(--*)`. Worst offender `#555` → `--text-3` = `#8a8a8a` (~6.6:1, AA). Alpha-channel variants like `#00ff99XX` intentionally left as literals — they're translucent overlays semantically distinct from `--accent`.
+
+Future readability tweaks are now one place: edit `--text-3` / `--text-4` / `--text-5` and the whole site shifts together.
+
+#### Visual consistency — owl logo + Guided Tour findings
+- Replaced the inline `← Home` link on `/queue-status` with the shared `_BACK` snippet (now uses `""" + _BACK + """` concat pattern, matching how `_FOOTER` is wired in the same page).
+- Added the owl SVG before the existing GoS logo in the `/methodology` topbar — project mark + org credit visible together. (User flagged that the methodology topbar layout still differs from other pages — recorded as a deferred "factorise headers/footers" item; the symptom is left-justified logo + title + bespoke `.topbar` div predates the `_BACK`/`_FOOTER` consolidation.)
+- Refactored `buildSummary` (`main.py:~4223`) on the Guided Tour final step: video transcoding now leads as the headline (`<h2>` + scope sentence + flat table), with LLM / Image / RAG demoted to collapsible `<details>` blocks under an "OTHER WORKLOADS MEASURED" subhead. Reflects the GoS thesis that video is the streaming-impact story; AI workloads are interesting but secondary.
+
+#### RAG Compare 3 Modes — bug fixes
+User reported `-0.0133 mWh/tok` for TinyLlama on rag_large in a Compare 3 Modes run. Investigation surfaced three bugs in `run_rag_compare_job` (`main.py:~2846`):
+
+1. **No cooldown between modes.** Loop ran `run_rag_measurement()` back-to-back. With TinyLlama's sub-2s inference, the rag_large baseline was contaminated by residual heat from the rag run (w_base inflated from 53 W cold → 64 W after rag), making `delta_w` go negative. Fixed: added `await asyncio.sleep(s["llm_rest_s"])` between iterations (skipped after the last). Reused existing `llm_rest_s` setting (default 10s) — no new settings field.
+2. **Stage-name collision.** Outer loop set `jobs[job_id]["stage"] = rag_mode` ("baseline"/"rag"/"rag_large"), then the inner `run_rag_measurement` immediately overwrote with its own "baseline"/"inference"/"done" stages. The JS `RAG_STAGE_IDX` map only knew the inner three, so it silently fell back to index 0 for "rag"/"rag_large" — the progress bar appeared to reset between modes. Fixed: outer loop no longer touches `stage`, only `current_mode` and a new `mode_index`.
+3. **Stage list undersized for the 9-phase flow.** Deferred — current 3-stage display works for single mode, and compare-mode renderer (`renderCompareProgress`) shows mode-level progress with the new "⏱ Cooling down" row, which is sufficient.
+
+#### RAG polish for tomorrow's demo
+- Renamed "Baseline" → "Without RAG" in the RAG section UI only (display labels: mode card, single-mode `ragModeLabels`, compare-mode `MODE_LABELS` ×2, Guided Tour `buildSummary` ragRows). Internal `baseline` mode key kept — renaming would break stored result files and CSV schemas.
+- Pre-populated `/rag` question textarea with **"What is REM (Remote Energy Measurement)?"**. Corpus-grounded (the GoS REM whitepaper is in the index), and surfaces a strong demo finding: all three model sizes retrieved the same correct chunks for this question, but TinyLlama hallucinated "REM is a framework provided by the European Commission" (blending the GoS source with an adjacent JRC sustainability framework chunk), while Gemma 3 12B and Phi-4 14B stayed faithful. Headline insight: **RAG retrieval ≠ RAG quality. Hallucination is a third axis on the energy/quality tradeoff.**
+- Added an inline `<details>` callout under the question textarea explaining (1) why this question, (2) what visitors will see, and (3) the headline insight. Visible inline rather than buried in methodology.
+- Replaced the previous "What year did your training data end?" demo question — it was a meta-question about the model's own state, but RAG floods context with dated corpus documents, causing models to conflate "this PDF is dated 2025" with "my training cutoff is 2025". Misleading demo of RAG capability.
+- Dropped the hardcoded `(10s)` from the RAG progress bar label — actual baseline duration honours `s["baseline_polls"]` (now 7s in user's settings). Label is now just `'Baseline poll'` so it can never go stale regardless of settings.
+
+#### LLM CSV — response column
+JSON files already include `inference.response` (full LLM output) but CSV export at `persist.py:71-76` excluded it. Added `response` to fieldnames and to the `_row` helper inside `_llm_rows`. CSV-quoting handled by `csv.DictWriter` defaults — newlines preserved inside quoted fields. Applies to single, batch, both, all, all_both, rag, and rag_compare modes.
+
+For `mode: rag_compare`, also confirmed structure: there's no top-level `inference.response` (no top-level `inference` dict at all) — each mode result lives under `results.<mode>.inference.response` (and also `results.<mode>.answer`). Both contain the full LLM output. No normalisation needed.
+
+#### RAG corpus document browser
+New `corpus_list()` in `rag.py` returns `[{name, rel_path, size_kb, indexed}]` — cross-referenced against the ChromaDB collection's source-filename metadata to show indexed vs pending. New `GET /rag/corpus-list` endpoint wraps it with totals. Collapsed `<details>` panel on `/rag` (between index bar and Model section); on first open it sorts pending first, renders a scrollable list with green ● / amber ○ status dots, per-doc size and tag, and a footer note explaining how to add docs.
+
+Demo angle this unlocks: "the GoS REM whitepaper is right here in the index, alongside 92 other PDFs — anyone can drop a paper in and rebuild." Concrete, visible, anti-slideware.
+
+#### Stale-box audit
+Tidied three Phase 6 boxes (`CLAUDE.md:173-175`) that were marked `[ ]` despite being completed in session 13: DNS A record, Let's Encrypt SSL, HTTP→HTTPS redirect. Same fix in memory: removed `project_phase6.md` and `project_deferred.md` (the latter pointed to "image elapsed time" which had been silently fixed before being ticked).
+
+### Files touched
+- `wattlab_service/main.py` — `_BASE_STYLES` constant + injection via `_FOOTER` and `/gate`; bulk hex → `var(--*)` migration; `_BACK` swap on `/queue-status`; owl logo on `/methodology` topbar; Guided Tour findings refactor (per-section row strings + collapsible AI workloads); RAG `/rag` page polish (Without RAG labels, REM question pre-fill, faithfulness `<details>` callout, dropped `(10s)`); `run_rag_compare_job` cooldown + stage-collision fix; `MODE_LABELS` cooldown row; corpus browser `<details>` panel + `loadCorpus()` JS; `GET /rag/corpus-list` endpoint
+- `wattlab_service/persist.py` — `response` added to LLM CSV fieldnames + `_row` helper
+- `wattlab_service/rag.py` — `corpus_list()` function (cross-references ChromaDB metadata for indexed status)
+- `CLAUDE.md` — Session 15 entry; 8 Deferred items ticked; 4 new Deferred items added with `[LOW]`/`[MID]` priority tags on the two RAG follow-ups; stale Phase 6 trio cleared
+- `JOURNAL.md` — this entry
+- Memory (`~/.claude/projects/-home-gos-wattlab/memory/`) — removed `project_deferred.md` and `project_phase6.md` (stale)
+
+### Open items coming out of this session
+- Restart `wattlab` systemd service after pulling these changes (sudo required)
+- Demo on 2026-04-30 — pre-warm Video Compare All Codecs (3 min) and RAG Compare 3 Modes with Phi-4 (~80s) before going live, so Previous Runs are populated as backup
+- Watch the new readable-on-mobile breakpoint after demo — `@media (max-width:600px)` block bumps base + sub-label fonts; if it overshoots on tablets we can narrow the breakpoint
+- After demo: see Deferred section for sized-and-prioritised follow-ups (RAG visitor upload `[MID]`, individual PDF view `[LOW]`, Findings step redesign, header factorisation)
+
+---
+
 ## Session 14 — 2026-04-24
 
 ### What we did

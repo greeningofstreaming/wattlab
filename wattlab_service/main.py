@@ -43,28 +43,29 @@ async def gate_middleware(request: Request, call_next):
 
 @app.get("/gate", response_class=HTMLResponse)
 async def gate_page(next: str = "/", error: bool = False):
-    err_html = ('<p style="color:#ff4400;font-family:monospace;font-size:0.85rem;'
+    err_html = ('<p style="color:var(--err);font-family:monospace;font-size:0.85rem;'
                 'margin-bottom:1rem">Incorrect password.</p>') if error else ''
     return f"""<!DOCTYPE html>
 <html>
 <head>
   <link rel="icon" type="image/svg+xml" href="/static/owl.svg">
   <title>WattLab</title>
+  {_BASE_STYLES}
   <style>
     *{{box-sizing:border-box;margin:0;padding:0}}
-    body{{font-family:monospace;background:#0a0a0a;color:#e0e0e0;
+    body{{font-family:monospace;background:var(--bg);color:var(--text);
          display:flex;flex-direction:column;align-items:center;
          justify-content:center;height:100vh;gap:0}}
-    h1{{color:#00ff99;font-size:1.4rem;margin-bottom:0.25rem}}
-    p.sub{{color:#444;font-size:0.8rem;margin-bottom:2rem}}
-    input{{background:#111;border:1px solid #333;color:#e0e0e0;
+    h1{{color:var(--accent);font-size:1.4rem;margin-bottom:0.25rem}}
+    p.sub{{color:var(--text-4);font-size:0.8rem;margin-bottom:2rem}}
+    input{{background:var(--panel);border:1px solid var(--border-3);color:var(--text);
            font-family:monospace;font-size:1rem;padding:0.6rem 1rem;
            width:200px;text-align:center;letter-spacing:0.1em}}
-    input:focus{{border-color:#00ff99;outline:none}}
-    button{{background:#00ff99;color:#000;border:none;
+    input:focus{{border-color:var(--accent);outline:none}}
+    button{{background:var(--accent);color:#000;border:none;
             font-family:monospace;font-size:1rem;padding:0.6rem 2rem;
             cursor:pointer;margin-top:0.75rem}}
-    button:hover{{background:#00dd88}}
+    button:hover{{background:var(--accent-hover)}}
     form{{display:flex;flex-direction:column;align-items:center;gap:0}}
   </style>
 </head>
@@ -197,18 +198,18 @@ _LOGO = (
     f' onmouseout="this.style.opacity=0.75">'
     f'<img src="{GOS_LOGO_URL}" alt="Greening of Streaming"'
     f' height="32" style="display:block">'
-    f'<span style="color:#444;font-size:0.72rem;font-family:monospace">'
+    f'<span style="color:var(--text-4);font-size:0.72rem;font-family:monospace">'
     f'greeningofstreaming.org</span></a>'
 )
 _BACK = (
     '<a href="/" style="display:inline-flex;align-items:center;gap:0.55rem;'
-    'color:#777;text-decoration:none;font-size:0.82rem;margin-bottom:1.5rem;'
+    'color:var(--text-3);text-decoration:none;font-size:0.82rem;margin-bottom:1.5rem;'
     'transition:color 0.2s" onmouseover="this.style.color=\'#00ff99\'"'
     ' onmouseout="this.style.color=\'#777\'">'
     '<img src="/static/owl.svg" alt="WattLab" '
     'style="height:26px;width:26px;display:block;flex-shrink:0">'
     '<span style="font-weight:bold;letter-spacing:0.02em">WattLab</span>'
-    '<span style="color:#333;margin-left:0.35rem">&nbsp;&nbsp;&larr; Home</span>'
+    '<span style="color:var(--text-5);margin-left:0.35rem">&nbsp;&nbsp;&larr; Home</span>'
     '</a>'
 )
 
@@ -220,9 +221,9 @@ GITHUB_ISSUES_URL = "https://github.com/greeningofstreaming/wattlab/issues"
 # Values are filled in by the shared _LIVE_JS poller below via data-live hooks.
 _QUEUE_BADGE = (
     '<div id="gos-qbadge" style="position:fixed;bottom:1rem;right:1rem;'
-    'font-family:monospace;font-size:0.72rem;background:#111;border:1px solid #1a1a1a;'
+    'font-family:monospace;font-size:0.72rem;background:var(--panel);border:1px solid var(--border-2);'
     'padding:0.3rem 0.6rem;max-width:calc(100vw - 2rem)">'
-    '<a href="/queue-status" style="color:#555;text-decoration:none;white-space:nowrap">'
+    '<a href="/queue-status" style="color:var(--text-3);text-decoration:none;white-space:nowrap">'
     '<span data-live="watts">—</span>'
     ' · CPU <span data-live="cpu_tctl">—</span>'
     ' · GPU <span data-live="gpu_junction">—</span>'
@@ -260,15 +261,57 @@ _LIVE_JS = (
 
 # "Report an issue" link in every page footer — points to GitHub issue tracker.
 _ISSUES_LINK = (
-    '<div style="margin-top:0.75rem;font-family:monospace;font-size:0.72rem;color:#333">'
+    '<div style="margin-top:0.75rem;font-family:monospace;font-size:0.72rem;color:var(--text-5)">'
     'Spotted a bug or have a feature request? '
     f'<a href="{GITHUB_ISSUES_URL}" target="_blank" rel="noopener" '
-    'style="color:#555;text-decoration:none;border-bottom:1px solid #222">'
+    'style="color:var(--text-3);text-decoration:none;border-bottom:1px solid var(--border)">'
     'Open an issue on GitHub &rarr;</a></div>'
 )
 
+# Single source of truth for content colors, panel/border tones, and base
+# readability rules. CSS variables defined in :root cascade globally, so any
+# inline `style="color:var(--text-3)"` resolves correctly regardless of where
+# this <style> block sits in the document. Injected via _FOOTER (every page
+# that uses the standard footer) and via the gate page directly.
+_BASE_STYLES = (
+    '<style>'
+    ':root{'
+    # backgrounds
+    '--bg:#0a0a0a;'
+    '--panel:#111;'
+    '--panel-2:#0d0d0d;'
+    # borders (light → dark)
+    '--border:#222;'
+    '--border-2:#1a1a1a;'
+    '--border-3:#333;'
+    # text — text-3 is the new "secondary" default. All values were chosen
+    # for WCAG AA contrast on --bg (≥4.5:1) except --text-5 which is for
+    # purely decorative non-content (separators, faint hints).
+    '--text:#e0e0e0;'      # primary body         (~13:1, AAA)
+    '--text-2:#bbb;'       # bright secondary     (~9.7:1, AAA)
+    '--text-3:#8a8a8a;'    # default secondary    (~6.6:1, AA)
+    '--text-4:#707070;'    # tertiary / muted     (~4.7:1, AA)
+    '--text-5:#5a5a5a;'    # faint decorative     (~3.5:1)
+    # accents — already pass, just consolidated
+    '--accent:#00ff99;'
+    '--accent-hover:#00dd88;'
+    '--accent-soft:#00ff9922;'
+    '--warn:#ffaa00;'
+    '--err:#ff4400;'
+    '}'
+    # global readability
+    'body{font-size:14px;line-height:1.55}'
+    '@media(max-width:600px){'
+    'body{font-size:15px;line-height:1.6}'
+    # bump the smallest fonts on mobile so muted text stays above ~12px
+    '.sub,.subtitle,.scope,.label,.elapsed,.t-lbl{font-size:0.85rem!important}'
+    '}'
+    '</style>'
+)
+
 _FOOTER = (
-    f'<footer style="margin-top:3rem;padding-top:1rem;border-top:1px solid #111">'
+    f'{_BASE_STYLES}'
+    f'<footer style="margin-top:3rem;padding-top:1rem;border-top:1px solid var(--panel)">'
     f'{_LOGO}{_ISSUES_LINK}</footer>'
     f'{_QUEUE_BADGE}{_LIVE_JS}'
 )
@@ -276,24 +319,24 @@ _FOOTER = (
 # Confidence flag popover — inject into any page that shows .conf-badge elements.
 # Plain string (not f-string) so JS curly braces need no escaping.
 _CONF_HELP_WIDGET = (
-    '<div id="conf-pop" style="display:none;position:fixed;z-index:9999;background:#111;'
-    'border:1px solid #222;padding:1rem 1.25rem;max-width:300px;font-size:0.8rem;'
+    '<div id="conf-pop" style="display:none;position:fixed;z-index:9999;background:var(--panel);'
+    'border:1px solid var(--border);padding:1rem 1.25rem;max-width:300px;font-size:0.8rem;'
     'line-height:1.7;box-shadow:0 4px 24px #000a">'
-    '<div style="font-family:monospace;color:#333;font-size:0.65rem;text-transform:uppercase;'
+    '<div style="font-family:monospace;color:var(--text-5);font-size:0.65rem;text-transform:uppercase;'
     'letter-spacing:0.06em;margin-bottom:0.75rem">Confidence flag</div>'
     '<div style="margin-bottom:0.5rem">'
     '<span style="font-family:monospace">🟢 Repeatable</span>'
-    '<span style="color:#555;display:block;font-size:0.75rem;padding-left:1.4rem">'
+    '<span style="color:var(--text-3);display:block;font-size:0.75rem;padding-left:1.4rem">'
     'ΔW &gt; 5W and ≥ 10 polls. Reliable enough to cite.</span></div>'
     '<div style="margin-bottom:0.5rem">'
     '<span style="font-family:monospace">🟡 Early insight</span>'
-    '<span style="color:#555;display:block;font-size:0.75rem;padding-left:1.4rem">'
+    '<span style="color:var(--text-3);display:block;font-size:0.75rem;padding-left:1.4rem">'
     'ΔW ≥ 2W or ≥ 5 polls. Directional, needs more runs.</span></div>'
     '<div>'
     '<span style="font-family:monospace">🔴 Need more data</span>'
-    '<span style="color:#555;display:block;font-size:0.75rem;padding-left:1.4rem">'
+    '<span style="color:var(--text-3);display:block;font-size:0.75rem;padding-left:1.4rem">'
     'ΔW &lt; 2W. Near P110 noise floor. Don\'t cite yet.</span></div>'
-    '<div style="color:#2a2a2a;font-size:0.7rem;margin-top:0.75rem;font-family:monospace">'
+    '<div style="color:var(--text-5);font-size:0.7rem;margin-top:0.75rem;font-family:monospace">'
     'ΔW = mean task power \u2212 idle baseline \u00b7 1s P110 polls</div>'
     '</div>'
     '<script>(function(){'
@@ -335,16 +378,16 @@ function wlStageList(stages, cur) {
 function wlRenderProgress(opts) {
     var w = opts.watts;
     var wHtml = w != null
-        ? '<div style="font-size:2.5rem;color:#00ff99;font-family:monospace;font-weight:bold;margin:0.75rem 0 0">'
+        ? '<div style="font-size:2.5rem;color:var(--accent);font-family:monospace;font-weight:bold;margin:0.75rem 0 0">'
           + w.toFixed(1) + ' W</div>'
-          + '<div style="color:#555;font-size:0.72rem;letter-spacing:0.04em;margin-bottom:0.5rem">live wall power \xb7 Tapo P110</div>'
+          + '<div style="color:var(--text-3);font-size:0.72rem;letter-spacing:0.04em;margin-bottom:0.5rem">live wall power \xb7 Tapo P110</div>'
         : '';
     var elHtml = opts.elapsed != null
-        ? '<div style="color:#444;font-size:0.78rem;margin-top:0.4rem">Elapsed: ' + wlFormatElapsed(opts.elapsed) + '</div>'
+        ? '<div style="color:var(--text-4);font-size:0.78rem;margin-top:0.4rem">Elapsed: ' + wlFormatElapsed(opts.elapsed) + '</div>'
         : '';
     document.getElementById('status').innerHTML =
-        '<div style="border:1px solid #222;padding:1.5rem">'
-        + '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">'
+        '<div style="border:1px solid var(--border);padding:1.5rem">'
+        + '<div style="color:var(--warn);font-size:0.9rem;margin-bottom:0.75rem">'
         + (opts.header || 'Measuring \u2014 do not close this tab') + '</div>'
         + (opts.stagesHtml || '')
         + wHtml + elHtml
@@ -353,9 +396,9 @@ function wlRenderProgress(opts) {
 }
 function wlRenderQueued(pos) {
     document.getElementById('status').innerHTML =
-        '<div style="border:1px solid #333;padding:1.5rem">'
-        + '<div style="color:#ffaa00;font-size:0.9rem;margin-bottom:0.75rem">\u23f1 Queued \u2014 position ' + pos + '</div>'
-        + '<div style="color:#555;font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>'
+        '<div style="border:1px solid var(--border-3);padding:1.5rem">'
+        + '<div style="color:var(--warn);font-size:0.9rem;margin-bottom:0.75rem">\u23f1 Queued \u2014 position ' + pos + '</div>'
+        + '<div style="color:var(--text-3);font-size:0.82rem">Another measurement is running. Your job will start automatically.</div>'
         + '</div>';
 }
 </script>"""
@@ -373,46 +416,46 @@ async def index():
   <title>WattLab — GoS</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{ font-family: monospace; background: #0a0a0a; color: #e0e0e0;
+        body {{ font-family: monospace; background: var(--bg); color: var(--text);
                display: flex; flex-direction: column; align-items: center;
                justify-content: center; min-height: 100vh; padding: 2rem 1rem; }}
         .hero-mark {{ display: flex; align-items: center; gap: 0.75rem;
                       margin-bottom: 1.5rem; }}
         .hero-mark img {{ height: 72px; width: 72px; display: block; }}
-        .hero-mark .name {{ font-size: 1.4rem; color: #00ff99;
+        .hero-mark .name {{ font-size: 1.4rem; color: var(--accent);
                             font-weight: bold; letter-spacing: 0.05em; }}
-        .hero-mark .tagline {{ display: block; color: #444; font-size: 0.72rem;
+        .hero-mark .tagline {{ display: block; color: var(--text-4); font-size: 0.72rem;
                                letter-spacing: 0.04em; margin-top: 0.15rem; }}
-        .watts {{ font-size: 6rem; color: #00ff99; font-weight: bold; }}
-        .label {{ font-size: 1.2rem; color: #888; margin-top: 1rem; }}
-        .scope {{ font-size: 0.8rem; color: #444; margin-top: 0.5rem; }}
+        .watts {{ font-size: 6rem; color: var(--accent); font-weight: bold; }}
+        .label {{ font-size: 1.2rem; color: var(--text-3); margin-top: 1rem; }}
+        .scope {{ font-size: 0.8rem; color: var(--text-4); margin-top: 0.5rem; }}
         .temps {{ margin-top: 1.25rem; display: flex; gap: 1.5rem;
-                  font-size: 0.95rem; color: #888; }}
-        .temps .t-val {{ color: #ccc; font-weight: bold; }}
-        .temps .t-lbl {{ color: #555; font-size: 0.7rem; letter-spacing: 0.05em;
+                  font-size: 0.95rem; color: var(--text-3); }}
+        .temps .t-val {{ color: var(--text-2); font-weight: bold; }}
+        .temps .t-lbl {{ color: var(--text-3); font-size: 0.7rem; letter-spacing: 0.05em;
                          text-transform: uppercase; display: block; margin-top: 0.2rem; }}
         .nav {{ margin-top: 3rem; display: flex; flex-direction: column; align-items: center;
                 gap: 1.25rem; width: 100%; max-width: 600px; }}
-        .nav-label {{ font-size: 0.65rem; color: #333; letter-spacing: 0.1em;
+        .nav-label {{ font-size: 0.65rem; color: var(--text-5); letter-spacing: 0.1em;
                       text-transform: uppercase; margin-bottom: -0.5rem; }}
-        .nav-tour a {{ color: #0a0a0a; background: #00ff99; text-decoration: none;
+        .nav-tour a {{ color: #0a0a0a; background: var(--accent); text-decoration: none;
                        padding: 0.6rem 2.5rem; font-size: 1rem; font-weight: bold;
                        display: inline-block; }}
-        .nav-tour a:hover {{ background: #00cc77; }}
-        .nav-video a {{ color: #00ff99; text-decoration: none;
-                        border: 1px solid #00ff99; padding: 0.55rem 2rem;
+        .nav-tour a:hover {{ background: var(--accent-hover); }}
+        .nav-video a {{ color: var(--accent); text-decoration: none;
+                        border: 1px solid var(--accent); padding: 0.55rem 2rem;
                         font-size: 1rem; display: inline-block; }}
         .nav-video a:hover {{ background: #00ff9922; }}
         .nav-ai {{ display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }}
-        .nav-ai a {{ color: #888; text-decoration: none;
-                     border: 1px solid #2a2a2a; padding: 0.4rem 1rem;
+        .nav-ai a {{ color: var(--text-3); text-decoration: none;
+                     border: 1px solid var(--border-2); padding: 0.4rem 1rem;
                      font-size: 0.85rem; }}
-        .nav-ai a:hover {{ color: #ccc; border-color: #444; }}
+        .nav-ai a:hover {{ color: var(--text-2); border-color: var(--text-4); }}
         .nav-util {{ display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }}
-        .nav-util a {{ color: #444; text-decoration: none;
-                       border: 1px solid #1a1a1a; padding: 0.3rem 0.75rem;
+        .nav-util a {{ color: var(--text-4); text-decoration: none;
+                       border: 1px solid var(--border-2); padding: 0.3rem 0.75rem;
                        font-size: 0.75rem; }}
-        .nav-util a:hover {{ color: #777; border-color: #333; }}
+        .nav-util a:hover {{ color: var(--text-3); border-color: var(--text-5); }}
     </style>
 </head>
 <body>
@@ -485,7 +528,7 @@ async def live_json():
 async def video_page(request: Request):
     is_lan = _is_local(request)
     queue_depth = len(pending_queue) + (1 if current_job_id else 0)
-    busy_banner = (f'<div style="background:#333;color:#ffaa00;padding:0.75rem 1rem;'
+    busy_banner = (f'<div style="background:var(--border-3);color:var(--warn);padding:0.75rem 1rem;'
                    f'margin-bottom:1rem;font-size:0.85rem">'
                    f'⏱ {queue_depth} job{"s" if queue_depth != 1 else ""} in queue — '
                    f'yours will be added and run automatically.</div>') \
@@ -498,75 +541,75 @@ async def video_page(request: Request):
   <title>WattLab — Video Test</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{ font-family: monospace; background: #0a0a0a; color: #e0e0e0;
+        body {{ font-family: monospace; background: var(--bg); color: var(--text);
                max-width: 780px; margin: 0 auto; padding: 2rem; }}
-        h1 {{ color: #00ff99; margin-bottom: 0.25rem; font-size: 1.6rem; }}
-        .subtitle {{ color: #555; font-size: 0.8rem; margin-bottom: 1.5rem; }}
-        .info {{ color: #777; font-size: 0.82rem; margin-bottom: 1.5rem;
+        h1 {{ color: var(--accent); margin-bottom: 0.25rem; font-size: 1.6rem; }}
+        .subtitle {{ color: var(--text-3); font-size: 0.8rem; margin-bottom: 1.5rem; }}
+        .info {{ color: var(--text-3); font-size: 0.82rem; margin-bottom: 1.5rem;
                  border-left: 2px solid #222; padding-left: 1rem; line-height: 1.6; }}
         .presets {{ display: flex; gap: 0.75rem; margin-bottom: 1.5rem; }}
-        .preset {{ border: 1px solid #333; padding: 1rem; cursor: pointer;
+        .preset {{ border: 1px solid var(--border-3); padding: 1rem; cursor: pointer;
                    flex: 1; transition: border-color 0.15s; }}
         .preset:hover {{ border-color: #00ff9966; }}
-        .preset.selected {{ border-color: #00ff99; background: #00ff9911; }}
-        .preset h3 {{ color: #00ff99; font-size: 0.9rem; margin-bottom: 0.4rem; }}
-        .preset p {{ color: #666; font-size: 0.78rem; line-height: 1.5; }}
+        .preset.selected {{ border-color: var(--accent); background: #00ff9911; }}
+        .preset h3 {{ color: var(--accent); font-size: 0.9rem; margin-bottom: 0.4rem; }}
+        .preset p {{ color: var(--text-4); font-size: 0.78rem; line-height: 1.5; }}
         .preset .badge {{ display: inline-block; background: #00ff9922;
-                          color: #00ff99; font-size: 0.7rem;
+                          color: var(--accent); font-size: 0.7rem;
                           padding: 0.1rem 0.4rem; margin-bottom: 0.4rem; }}
         .pdesc {{ margin-top: 0.4rem; }}
-        .pdesc summary {{ color: #444; font-size: 0.7rem; cursor: pointer; list-style: none; }}
+        .pdesc summary {{ color: var(--text-4); font-size: 0.7rem; cursor: pointer; list-style: none; }}
         .pdesc summary::-webkit-details-marker {{ display: none; }}
         .pdesc summary::before {{ content: '▸ '; }}
         details[open].pdesc summary::before {{ content: '▾ '; }}
-        .pdesc[open] {{ color: #555; font-size: 0.72rem; line-height: 1.5; padding-top: 0.3rem; }}
-        input[type=file] {{ color: #aaa; margin-bottom: 1rem; width: 100%; }}
-        button {{ background: #00ff99; color: #000; border: none;
+        .pdesc[open] {{ color: var(--text-3); font-size: 0.72rem; line-height: 1.5; padding-top: 0.3rem; }}
+        input[type=file] {{ color: var(--text-2); margin-bottom: 1rem; width: 100%; }}
+        button {{ background: var(--accent); color: #000; border: none;
                   padding: 0.75rem 2rem; cursor: pointer;
                   font-family: monospace; font-size: 1rem; }}
-        button:disabled {{ background: #222; color: #555; cursor: not-allowed; }}
-        button:hover:not(:disabled) {{ background: #00dd88; }}
+        button:disabled {{ background: var(--border); color: var(--text-3); cursor: not-allowed; }}
+        button:hover:not(:disabled) {{ background: var(--accent-hover); }}
         #status {{ margin-top: 1.5rem; }}
 
         /* Progress styles */
-        .progress-box {{ border: 1px solid #222; padding: 1.5rem; }}
-        .progress-header {{ color: #ffaa00; font-size: 0.9rem; margin-bottom: 1.25rem; }}
+        .progress-box {{ border: 1px solid var(--border); padding: 1.5rem; }}
+        .progress-header {{ color: var(--warn); font-size: 0.9rem; margin-bottom: 1.25rem; }}
         .stages {{ display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.25rem; }}
         .stage {{ display: flex; align-items: center; gap: 0.75rem; font-size: 0.82rem; }}
         .stage-icon {{ width: 1.2rem; text-align: center; flex-shrink: 0; }}
-        .stage-label {{ color: #666; }}
-        .stage.done .stage-label {{ color: #00ff99; }}
-        .stage.active .stage-label {{ color: #ffaa00; }}
+        .stage-label {{ color: var(--text-4); }}
+        .stage.done .stage-label {{ color: var(--accent); }}
+        .stage.active .stage-label {{ color: var(--warn); }}
         .stage.active .stage-icon {{ animation: pulse 1s infinite; }}
         @keyframes pulse {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:0.3; }} }}
         .progress-footer {{ display: flex; justify-content: space-between;
-                            color: #444; font-size: 0.78rem; border-top: 1px solid #111;
+                            color: var(--text-4); font-size: 0.78rem; border-top: 1px solid var(--panel);
                             padding-top: 0.75rem; }}
-        .elapsed {{ color: #555; }}
+        .elapsed {{ color: var(--text-3); }}
 
         /* Report styles */
-        .report h2 {{ color: #00ff99; font-size: 1.1rem; margin-bottom: 1rem;
-                      padding-bottom: 0.5rem; border-bottom: 1px solid #222; }}
+        .report h2 {{ color: var(--accent); font-size: 1.1rem; margin-bottom: 1rem;
+                      padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }}
         .cols {{ display: flex; gap: 1rem; margin-bottom: 1rem; }}
-        .col {{ flex: 1; border: 1px solid #222; padding: 1rem; }}
-        .col h3 {{ color: #00ff99; font-size: 0.85rem; margin-bottom: 0.4rem; }}
-        .col .sub {{ color: #555; font-size: 0.75rem; margin-bottom: 0.75rem; }}
+        .col {{ flex: 1; border: 1px solid var(--border); padding: 1rem; }}
+        .col h3 {{ color: var(--accent); font-size: 0.85rem; margin-bottom: 0.4rem; }}
+        .col .sub {{ color: var(--text-3); font-size: 0.75rem; margin-bottom: 0.75rem; }}
         .metric {{ display: flex; justify-content: space-between;
-                   padding: 0.3rem 0; border-bottom: 1px solid #111; font-size: 0.82rem; }}
+                   padding: 0.3rem 0; border-bottom: 1px solid var(--panel); font-size: 0.82rem; }}
         .metric:last-child {{ border-bottom: none; }}
-        .val {{ color: #00ff99; }}
-        .section-title {{ color: #444; font-size: 0.72rem; text-transform: uppercase;
+        .val {{ color: var(--accent); }}
+        .section-title {{ color: var(--text-4); font-size: 0.72rem; text-transform: uppercase;
                           letter-spacing: 0.05em; margin: 0.75rem 0 0.4rem; }}
         .analysis-box {{ border: 1px solid #00ff9944; padding: 1rem;
                          margin-bottom: 1rem; background: #00ff9908; }}
-        .analysis-box h3 {{ color: #00ff99; font-size: 0.85rem; margin-bottom: 0.5rem; }}
-        .finding {{ color: #ccc; font-size: 0.85rem; line-height: 1.7; }}
-        .conf-note {{ color: #666; font-size: 0.78rem; margin-top: 0.5rem; }}
-        .scope-note {{ color: #333; font-size: 0.72rem; margin-top: 1rem; }}
-        .single-report {{ border: 1px solid #222; padding: 1.5rem; }}
-        a.back {{ color: #555; text-decoration: none; font-size: 0.82rem;
+        .analysis-box h3 {{ color: var(--accent); font-size: 0.85rem; margin-bottom: 0.5rem; }}
+        .finding {{ color: var(--text-2); font-size: 0.85rem; line-height: 1.7; }}
+        .conf-note {{ color: var(--text-4); font-size: 0.78rem; margin-top: 0.5rem; }}
+        .scope-note {{ color: var(--text-5); font-size: 0.72rem; margin-top: 1rem; }}
+        .single-report {{ border: 1px solid var(--border); padding: 1.5rem; }}
+        a.back {{ color: var(--text-3); text-decoration: none; font-size: 0.82rem;
                   display: inline-block; margin-top: 1.5rem; }}
-        a.back:hover {{ color: #00ff99; }}
+        a.back:hover {{ color: var(--accent); }}
     </style>
 </head>
 <body>
@@ -575,15 +618,15 @@ async def video_page(request: Request):
     <h1>Video Transcode Energy Test</h1>
     <div class="subtitle">Greening of Streaming · WattLab · GoS1</div>
 
-    <div style="margin-bottom:1rem;font-size:0.78rem;color:#555">
-        First time here? <a href="/demo" style="color:#00ff99;text-decoration:none">Try the Guided Tour →</a>
+    <div style="margin-bottom:1rem;font-size:0.78rem;color:var(--text-3)">
+        First time here? <a href="/demo" style="color:var(--accent);text-decoration:none">Try the Guided Tour →</a>
     </div>
 
     <details style="margin-bottom:1.5rem;border-left:2px solid #222;padding-left:1rem">
-        <summary style="cursor:pointer;color:#888;font-size:0.82rem;list-style:none;outline:none">
-            ⓘ About this test <span style="color:#444;font-size:0.72rem">(click to expand)</span>
+        <summary style="cursor:pointer;color:var(--text-3);font-size:0.82rem;list-style:none;outline:none">
+            ⓘ About this test <span style="color:var(--text-4);font-size:0.72rem">(click to expand)</span>
         </summary>
-        <div style="color:#777;font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
+        <div style="color:var(--text-3);font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
             Transcode a source video and measure the server's wall-power draw during the encode.<br>
             Accepted: MP4, MOV, MKV, AVI, WebM, TS · Max 1GB.<br>
             Baseline measured 10s before each run · P110 + thermals at 1s intervals.<br>
@@ -593,7 +636,7 @@ async def video_page(request: Request):
         </div>
     </details>
 
-    <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+    <div style="color:var(--text-3);font-size:0.75rem;text-transform:uppercase;
                 letter-spacing:0.05em;margin-bottom:0.5rem">H.264</div>
     <div class="presets" style="margin-bottom:0.75rem">
         <div class="preset" id="preset-cpu" onclick="selectPreset('cpu')">
@@ -612,7 +655,7 @@ async def video_page(request: Request):
             <details class="pdesc"><summary>details</summary>Side-by-side energy + thermal report with analysis.</details>
         </div>
     </div>
-    <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+    <div style="color:var(--text-3);font-size:0.75rem;text-transform:uppercase;
                 letter-spacing:0.05em;margin-bottom:0.5rem">H.265</div>
     <div class="presets" style="margin-bottom:0.75rem">
         <div class="preset" id="preset-h265_cpu" onclick="selectPreset('h265_cpu')">
@@ -631,7 +674,7 @@ async def video_page(request: Request):
             <details class="pdesc"><summary>details</summary>Side-by-side H.265 CPU vs GPU comparison.</details>
         </div>
     </div>
-    <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+    <div style="color:var(--text-3);font-size:0.75rem;text-transform:uppercase;
                 letter-spacing:0.05em;margin-bottom:0.5rem">AV1</div>
     <div class="presets" style="margin-bottom:1.5rem">
         <div class="preset" id="preset-av1_cpu" onclick="selectPreset('av1_cpu')">
@@ -656,48 +699,48 @@ async def video_page(request: Request):
          id="preset-all_codecs" onclick="selectPreset('all_codecs')"
          style="cursor:pointer">
         <div>
-            <div style="color:#00ff99;font-size:0.9rem;font-weight:bold">Compare all codecs</div>
-            <div style="color:#555;font-size:0.75rem;margin-top:0.2rem">H.264 · H.265 · AV1 · CPU + GPU · same source · same target bitrate — full matrix</div>
+            <div style="color:var(--accent);font-size:0.9rem;font-weight:bold">Compare all codecs</div>
+            <div style="color:var(--text-3);font-size:0.75rem;margin-top:0.2rem">H.264 · H.265 · AV1 · CPU + GPU · same source · same target bitrate — full matrix</div>
         </div>
-        <div style="color:#444;font-size:0.75rem">~6× longer · locks queue</div>
+        <div style="color:var(--text-4);font-size:0.75rem">~6× longer · locks queue</div>
     </div>
 
     <div style="margin-bottom:1.5rem">
-        <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+        <div style="color:var(--text-3);font-size:0.75rem;text-transform:uppercase;
                     letter-spacing:0.05em;margin-bottom:0.75rem">Source</div>
         <div style="display:flex;flex-direction:column;gap:0.5rem">
             <label style="display:flex;align-items:flex-start;gap:0.75rem;
-                          border:1px solid #333;padding:0.75rem;cursor:pointer"
+                          border:1px solid var(--border-3);padding:0.75rem;cursor:pointer"
                    id="src-upload-label">
                 <input type="radio" name="source" value="upload" checked
                        onchange="selectSource('upload')"
-                       style="margin-top:0.2rem;accent-color:#00ff99">
+                       style="margin-top:0.2rem;accent-color:var(--accent)">
                 <div>
-                    <div style="color:#e0e0e0;font-size:0.85rem">Upload a file</div>
-                    <div style="color:#555;font-size:0.75rem">MP4, MOV, MKV, AVI, WebM, TS · Max 1GB</div>
+                    <div style="color:var(--text);font-size:0.85rem">Upload a file</div>
+                    <div style="color:var(--text-3);font-size:0.75rem">MP4, MOV, MKV, AVI, WebM, TS · Max 1GB</div>
                 </div>
             </label>
             <label style="display:flex;align-items:flex-start;gap:0.75rem;
-                          border:1px solid #333;padding:0.75rem;cursor:pointer">
+                          border:1px solid var(--border-3);padding:0.75rem;cursor:pointer">
                 <input type="radio" name="source" value="meridian_120s"
                        onchange="selectSource('meridian_120s')"
-                       style="margin-top:0.2rem;accent-color:#00ff99">
+                       style="margin-top:0.2rem;accent-color:var(--accent)">
                 <div>
-                    <div style="color:#e0e0e0;font-size:0.85rem">Meridian 4K — 2 min extract</div>
-                    <div style="color:#555;font-size:0.75rem">
+                    <div style="color:var(--text);font-size:0.85rem">Meridian 4K — 2 min extract</div>
+                    <div style="color:var(--text-3);font-size:0.75rem">
                         3840×2160 · H.264 · 2min · ~200MB · fast demo · CC BY 4.0
                     </div>
                 </div>
             </label>
             <label style="display:flex;align-items:flex-start;gap:0.75rem;
-                          border:1px solid #333;padding:0.75rem;cursor:pointer"
+                          border:1px solid var(--border-3);padding:0.75rem;cursor:pointer"
                    id="src-meridian-label">
                 <input type="radio" name="source" value="meridian_4k"
                        onchange="selectSource('meridian_4k')"
-                       style="margin-top:0.2rem;accent-color:#00ff99">
+                       style="margin-top:0.2rem;accent-color:var(--accent)">
                 <div>
-                    <div style="color:#e0e0e0;font-size:0.85rem">Meridian 4K — full 12 min</div>
-                    <div style="color:#555;font-size:0.75rem">
+                    <div style="color:var(--text);font-size:0.85rem">Meridian 4K — full 12 min</div>
+                    <div style="color:var(--text-3);font-size:0.75rem">
                         3840×2160 · 59.94fps · H.264 · 12min · 812MB · CC BY 4.0 · ⚠ Both mode ~6-8 min
                     </div>
                 </div>
@@ -706,7 +749,7 @@ async def video_page(request: Request):
     </div>
 
     <div id="cmd-preview-area" style="margin-bottom:1.5rem;display:none">
-        <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+        <div style="color:var(--text-3);font-size:0.75rem;text-transform:uppercase;
                     letter-spacing:0.05em;margin-bottom:0.5rem">ffmpeg command</div>
         <div id="cmd-preview-box"></div>
     </div>
@@ -717,7 +760,7 @@ async def video_page(request: Request):
     <button id="runBtn" onclick="uploadAndRun()">Upload & Measure</button>
 
     <div id="status"></div>
-    <div id="prev-runs" style="margin-top:2rem;border-top:1px solid #111;padding-top:1.5rem"></div>
+    <div id="prev-runs" style="margin-top:2rem;border-top:1px solid var(--panel);padding-top:1.5rem"></div>
 
     <script>
     const IS_LAN = {'true' if is_lan else 'false'};
@@ -736,14 +779,14 @@ async def video_page(request: Request):
     function _cmdBox(id, value, forceReadonly=false) {{
         if (IS_LAN && !forceReadonly) {{
             return '<textarea id="' + id + '" rows="3" spellcheck="false" '
-                + 'style="width:100%;background:#0d0d0d;border:1px solid #2a2a2a;'
-                + 'color:#aaa;font-family:monospace;font-size:0.72rem;'
+                + 'style="width:100%;background:var(--panel-2);border:1px solid var(--border-2);'
+                + 'color:var(--text-2);font-family:monospace;font-size:0.72rem;'
                 + 'padding:0.5rem;resize:vertical;line-height:1.5">'
                 + value + '</textarea>';
         }} else {{
-            return '<div style="background:#0d0d0d;border:1px solid #1a1a1a;'
+            return '<div style="background:var(--panel-2);border:1px solid var(--border-2);'
                 + 'padding:0.5rem;font-family:monospace;font-size:0.72rem;'
-                + 'color:#555;word-break:break-all;line-height:1.5">' + value + '</div>';
+                + 'color:var(--text-3);word-break:break-all;line-height:1.5">' + value + '</div>';
         }}
     }}
 
@@ -757,15 +800,15 @@ async def video_page(request: Request):
                 customCmds = {{}};
                 const labels = {{cpu:'H.264 CPU',gpu:'H.264 GPU',h265_cpu:'H.265 CPU',h265_gpu:'H.265 GPU',av1_cpu:'AV1 CPU',av1_gpu:'AV1 GPU'}};
                 box.innerHTML = Object.entries(data.cmds).map(([k,v]) =>
-                    '<div style="color:#444;font-size:0.7rem;margin:0.4rem 0 0.2rem">' + (labels[k]||k) + '</div>'
+                    '<div style="color:var(--text-4);font-size:0.7rem;margin:0.4rem 0 0.2rem">' + (labels[k]||k) + '</div>'
                     + _cmdBox('cmd_'+k, v, true)
                 ).join('');
             }} else if (data.mode === 'both') {{
                 customCmds = {{cpu: data.cpu_cmd, gpu: data.gpu_cmd}};
                 box.innerHTML =
-                    '<div style="color:#444;font-size:0.7rem;margin-bottom:0.3rem">CPU</div>'
+                    '<div style="color:var(--text-4);font-size:0.7rem;margin-bottom:0.3rem">CPU</div>'
                     + _cmdBox('cmd_cpu', data.cpu_cmd)
-                    + '<div style="color:#444;font-size:0.7rem;margin:0.5rem 0 0.3rem">GPU</div>'
+                    + '<div style="color:var(--text-4);font-size:0.7rem;margin:0.5rem 0 0.3rem">GPU</div>'
                     + _cmdBox('cmd_gpu', data.gpu_cmd);
             }} else {{
                 customCmds = {{single: data.cmd}};
@@ -773,7 +816,7 @@ async def video_page(request: Request):
             }}
             area.style.display = 'block';
         }} catch(e) {{
-            box.innerHTML = '<div style="color:#555;font-size:0.72rem">Could not load preview</div>';
+            box.innerHTML = '<div style="color:var(--text-3);font-size:0.72rem">Could not load preview</div>';
             area.style.display = 'block';
         }}
     }}
@@ -864,7 +907,7 @@ async def video_page(request: Request):
             stagesHtml: wlStageList(stages, currentStage),
             watts: watts,
             elapsed: startTime ? Date.now() - startTime : null,
-            extraHtml: '<div style="color:#333;font-size:0.72rem;margin-top:0.4rem">Job: ' + jobId + ' \xb7 polling every 5s</div>',
+            extraHtml: '<div style="color:var(--text-5);font-size:0.72rem;margin-top:0.4rem">Job: ' + jobId + ' \xb7 polling every 5s</div>',
         }});
     }}
 
@@ -886,14 +929,14 @@ async def video_page(request: Request):
                 const file = document.getElementById('fileInput').files[0];
                 if (!file) {{ alert('Please select a file first'); btn.disabled = false; return; }}
                 if (file.size > 1024 * 1024 * 1024) {{ alert('File too large (max 1GB)'); btn.disabled = false; return; }}
-                status.innerHTML = '<div style="color:#ffaa00">Uploading ' + file.name + '...</div>';
+                status.innerHTML = '<div style="color:var(--warn)">Uploading ' + file.name + '...</div>';
                 const form = new FormData();
                 form.append('file', file);
                 form.append('preset', selectedPreset);
                 for (const [k, v] of Object.entries(cmds)) form.append(k, v);
                 resp = await fetch('/video/upload', {{ method: 'POST', body: form }});
             }} else {{
-                status.innerHTML = '<div style="color:#ffaa00">Starting measurement on ' + selectedSource + '...</div>';
+                status.innerHTML = '<div style="color:var(--warn)">Starting measurement on ' + selectedSource + '...</div>';
                 const form = new FormData();
                 form.append('source_key', selectedSource);
                 form.append('preset', selectedPreset);
@@ -908,7 +951,7 @@ async def video_page(request: Request):
                 const hint = isUpload && resp.status === 413
                     ? ' — file too large for server (nginx limit)'
                     : '';
-                status.innerHTML = '<div style="color:#ff4400">Failed (HTTP ' + resp.status + ')' + hint + '.</div>';
+                status.innerHTML = '<div style="color:var(--err)">Failed (HTTP ' + resp.status + ')' + hint + '.</div>';
                 btn.disabled = false;
                 return;
             }}
@@ -917,11 +960,11 @@ async def video_page(request: Request):
                 renderProgress(data.job_id, selectedPreset, 'starting');
                 pollJob(data.job_id, selectedPreset);
             }} else {{
-                status.innerHTML = '<div style="color:#ff4400">Error: ' + JSON.stringify(data) + '</div>';
+                status.innerHTML = '<div style="color:var(--err)">Error: ' + JSON.stringify(data) + '</div>';
                 btn.disabled = false;
             }}
         }} catch(e) {{
-            status.innerHTML = '<div style="color:#ff4400">Failed: ' + e + '</div>';
+            status.innerHTML = '<div style="color:var(--err)">Failed: ' + e + '</div>';
             btn.disabled = false;
         }}
     }}
@@ -941,7 +984,7 @@ async def video_page(request: Request):
             }} else if (data.status === 'error') {{
                 stopProgress();
                 document.getElementById('status').innerHTML =
-                    '<div style="color:#ff4400">Error: ' + data.error + '</div>';
+                    '<div style="color:var(--err)">Error: ' + data.error + '</div>';
                 document.getElementById('runBtn').disabled = false;
             }} else if (data.stage === 'queued') {{
                 renderQueued(data.queue_position);
@@ -967,13 +1010,13 @@ async def video_page(request: Request):
         const t = r.thermals;
         const pptNote = t.gpu_ppt_mean_w
             ? metricRow('GPU PPT mean / peak', t.gpu_ppt_mean_w + ' / ' + t.gpu_ppt_peak_w, 'W')
-              + '<div style="color:#444;font-size:0.72rem;padding:0.1rem 0 0.6rem 1rem">'
+              + '<div style="color:var(--text-4);font-size:0.72rem;padding:0.1rem 0 0.6rem 1rem">'
               + 'GPU self-reported power (PPT). P110 ΔW above is the full system delta — includes CPU, RAM, drives.'
               + '</div>'
             : '';
         const cmdNote = r.transcode && r.transcode.ffmpeg_cmd
-            ? '<details style="margin-top:0.75rem"><summary style="color:#333;font-size:0.72rem;cursor:pointer">ffmpeg command</summary>'
-              + '<div style="color:#555;font-size:0.7rem;font-family:monospace;word-break:break-all;margin-top:0.4rem;padding:0.5rem;background:#0d0d0d;border:1px solid #1a1a1a">'
+            ? '<details style="margin-top:0.75rem"><summary style="color:var(--text-5);font-size:0.72rem;cursor:pointer">ffmpeg command</summary>'
+              + '<div style="color:var(--text-3);font-size:0.7rem;font-family:monospace;word-break:break-all;margin-top:0.4rem;padding:0.5rem;background:var(--panel-2);border:1px solid var(--border-2)">'
               + r.transcode.ffmpeg_cmd + '</div></details>'
             : '';
         return `
@@ -995,7 +1038,7 @@ async def video_page(request: Request):
             ${{metricRow('GPU base → peak', t.gpu_base + ' → ' + t.gpu_peak, '°C')}}
             ${{pptNote}}
             <div style="margin-top:0.75rem">${{e.confidence.flag}} ${{e.confidence.label}}</div>
-            ${{e.confidence.hint ? '<div style="margin-top:0.35rem;color:#888;font-size:0.72rem">' + e.confidence.hint + '</div>' : ''}}
+            ${{e.confidence.hint ? '<div style="margin-top:0.35rem;color:var(--text-3);font-size:0.72rem">' + e.confidence.hint + '</div>' : ''}}
         </div>`;
     }}
 
@@ -1011,13 +1054,13 @@ async def video_page(request: Request):
             const isSpeedWinner  = a.speed_winner  === (res.preset_key === 'cpu' ? 'CPU' : 'GPU');
             const pptNote = t.gpu_ppt_mean_w
                 ? metricRow('GPU PPT mean', t.gpu_ppt_mean_w, 'W')
-                  + '<div style="color:#444;font-size:0.72rem;padding:0.1rem 0 0.6rem 1rem">'
+                  + '<div style="color:var(--text-4);font-size:0.72rem;padding:0.1rem 0 0.6rem 1rem">'
                   + 'GPU self-reported · P110 ΔW is full system delta.'
                   + '</div>'
                 : '';
             const cmdNote = res.transcode && res.transcode.ffmpeg_cmd
-                ? '<details style="margin-top:0.5rem"><summary style="color:#333;font-size:0.7rem;cursor:pointer">ffmpeg command</summary>'
-                  + '<div style="color:#555;font-size:0.68rem;font-family:monospace;word-break:break-all;margin-top:0.3rem;padding:0.4rem;background:#0d0d0d;border:1px solid #1a1a1a">'
+                ? '<details style="margin-top:0.5rem"><summary style="color:var(--text-5);font-size:0.7rem;cursor:pointer">ffmpeg command</summary>'
+                  + '<div style="color:var(--text-3);font-size:0.68rem;font-family:monospace;word-break:break-all;margin-top:0.3rem;padding:0.4rem;background:var(--panel-2);border:1px solid var(--border-2)">'
                   + res.transcode.ffmpeg_cmd + '</div></details>'
                 : '';
             return `<div class="col">
@@ -1040,7 +1083,7 @@ async def video_page(request: Request):
                 <div style="margin-top:0.75rem;font-size:0.8rem">
                     ${{e.confidence.flag}} ${{e.confidence.label}}
                 </div>
-                ${{e.confidence.hint ? '<div style="margin-top:0.3rem;color:#888;font-size:0.7rem">' + e.confidence.hint + '</div>' : ''}}
+                ${{e.confidence.hint ? '<div style="margin-top:0.3rem;color:var(--text-3);font-size:0.7rem">' + e.confidence.hint + '</div>' : ''}}
             </div>`;
         }}
 
@@ -1076,13 +1119,13 @@ async def video_page(request: Request):
             const cpuWin = (ew==='CPU'?'✓':'') + (sw==='CPU'?' 🏁':'');
             const gpuWin = (ew==='GPU'?'✓':'') + (sw==='GPU'?' 🏁':'');
             return `<tr>
-                <td style="color:#e0e0e0;font-weight:bold">${{label}}</td>
+                <td style="color:var(--text);font-weight:bold">${{label}}</td>
                 <td>${{fmt(ce.delta_t_s)}}s</td>
                 <td style="color:${{ew==='CPU'?'#00ff99':'#888'}}">${{fmt(ce.delta_e_wh)}} Wh ${{cpuWin}}</td>
-                <td style="color:#555;font-size:0.75rem">${{fmt(cd.cpu.output_size_mb)}} MB</td>
+                <td style="color:var(--text-3);font-size:0.75rem">${{fmt(cd.cpu.output_size_mb)}} MB</td>
                 <td>${{fmt(ge.delta_t_s)}}s</td>
                 <td style="color:${{ew==='GPU'?'#00ff99':'#888'}}">${{fmt(ge.delta_e_wh)}} Wh ${{gpuWin}}</td>
-                <td style="color:#555;font-size:0.75rem">${{fmt(cd.gpu.output_size_mb)}} MB</td>
+                <td style="color:var(--text-3);font-size:0.75rem">${{fmt(cd.gpu.output_size_mb)}} MB</td>
                 <td style="font-size:0.78rem">${{ce.confidence.flag}} ${{ge.confidence.flag}}</td>
             </tr>`;
         }}).join('');
@@ -1091,8 +1134,8 @@ async def video_page(request: Request):
         const bestS = a.fastest;
         const highlights = `
             <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:0.75rem;font-size:0.82rem">
-                <span>⚡ Most efficient: <span style="color:#00ff99">${{bestE ? bestE.label + ' (' + bestE.delta_e_wh + ' Wh)' : '—'}}</span></span>
-                <span>🏁 Fastest: <span style="color:#00ff99">${{bestS ? bestS.label + ' (' + bestS.delta_t_s + 's)' : '—'}}</span></span>
+                <span>⚡ Most efficient: <span style="color:var(--accent)">${{bestE ? bestE.label + ' (' + bestE.delta_e_wh + ' Wh)' : '—'}}</span></span>
+                <span>🏁 Fastest: <span style="color:var(--accent)">${{bestS ? bestS.label + ' (' + bestS.delta_t_s + 's)' : '—'}}</span></span>
             </div>`;
 
         // Per-codec collapsible detail
@@ -1102,7 +1145,7 @@ async def video_page(request: Request):
             function miniCol(res, tag) {{
                 const e = res.energy, t = res.thermals;
                 return `<div style="flex:1;min-width:180px">
-                    <div style="color:#888;font-size:0.72rem;margin-bottom:0.4rem">${{tag}}</div>
+                    <div style="color:var(--text-3);font-size:0.72rem;margin-bottom:0.4rem">${{tag}}</div>
                     ${{metricRow('Duration', e.delta_t_s, 's')}}
                     ${{metricRow('Output size', res.output_size_mb, 'MB')}}
                     ${{metricRow('Baseline', e.w_base, 'W')}}
@@ -1112,12 +1155,12 @@ async def video_page(request: Request):
                     ${{metricRow('CPU peak', t.cpu_peak, '°C')}}
                     ${{metricRow('GPU peak', t.gpu_peak, '°C')}}
                     <div style="margin-top:0.5rem;font-size:0.78rem">${{e.confidence.flag}} ${{e.confidence.label}}</div>
-                    ${{e.confidence.hint ? '<div style="color:#888;font-size:0.7rem;margin-top:0.2rem">' + e.confidence.hint + '</div>' : ''}}
+                    ${{e.confidence.hint ? '<div style="color:var(--text-3);font-size:0.7rem;margin-top:0.2rem">' + e.confidence.hint + '</div>' : ''}}
                 </div>`;
             }}
-            return `<details style="margin-top:0.5rem;border:1px solid #1a1a1a;padding:0.75rem">
-                <summary style="color:#888;font-size:0.8rem;cursor:pointer;list-style:none">
-                    <span style="color:#00ff99">${{label}}</span> — ${{cd.analysis.finding.slice(0,80)}}…
+            return `<details style="margin-top:0.5rem;border:1px solid var(--border-2);padding:0.75rem">
+                <summary style="color:var(--text-3);font-size:0.8rem;cursor:pointer;list-style:none">
+                    <span style="color:var(--accent)">${{label}}</span> — ${{cd.analysis.finding.slice(0,80)}}…
                 </summary>
                 <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:0.75rem">
                     ${{miniCol(cd.cpu, cd.cpu.preset_label)}}
@@ -1130,7 +1173,7 @@ async def video_page(request: Request):
         <div class="report">
             <h2>All Codecs — Energy &amp; Speed Matrix</h2>
             <table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:0.5rem">
-                <thead><tr style="color:#444;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em">
+                <thead><tr style="color:var(--text-4);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em">
                     <th style="text-align:left;padding:0.3rem 0.5rem 0.5rem 0">Codec</th>
                     <th style="text-align:right;padding:0.3rem 0.5rem">CPU time</th>
                     <th style="text-align:right;padding:0.3rem 0.5rem">CPU energy</th>
@@ -1142,9 +1185,9 @@ async def video_page(request: Request):
                 </tr></thead>
                 <tbody style="font-family:monospace">${{tableRows}}</tbody>
             </table>
-            <div style="font-size:0.7rem;color:#333;margin-bottom:0.25rem">✓ energy winner · 🏁 speed winner · CPU out / GPU out should match — confirms same bitrate target</div>
+            <div style="font-size:0.7rem;color:var(--text-5);margin-bottom:0.25rem">✓ energy winner · 🏁 speed winner · CPU out / GPU out should match — confirms same bitrate target</div>
             ${{highlights}}
-            <div style="margin-top:1rem;color:#555;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Per-codec detail</div>
+            <div style="margin-top:1rem;color:var(--text-3);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">Per-codec detail</div>
             ${{details}}
             <div class="scope-note">${{r.scope}}</div>
         </div>`;
@@ -1154,10 +1197,10 @@ async def video_page(request: Request):
         const base = '/results/video/' + jobId;
         return `<div style="margin-top:1rem;display:flex;gap:0.75rem">
             <a href="${{base}}/download.json" download
-               style="color:#00ff99;font-size:0.8rem;border:1px solid #00ff9944;
+               style="color:var(--accent);font-size:0.8rem;border:1px solid #00ff9944;
                       padding:0.3rem 0.75rem;text-decoration:none">↓ JSON</a>
             <a href="${{base}}/download.csv" download
-               style="color:#00ff99;font-size:0.8rem;border:1px solid #00ff9944;
+               style="color:var(--accent);font-size:0.8rem;border:1px solid #00ff9944;
                       padding:0.3rem 0.75rem;text-decoration:none">↓ CSV</a>
         </div>`;
     }}
@@ -1165,7 +1208,7 @@ async def video_page(request: Request):
     function renderResult(r, jobId) {{
         const el = document.getElementById('status');
         const elapsed = startTime ? wlFormatElapsed(Date.now() - startTime) : '';
-        const elapsedNote = elapsed ? `<div style="color:#444;font-size:0.78rem;margin-bottom:1rem">
+        const elapsedNote = elapsed ? `<div style="color:var(--text-4);font-size:0.78rem;margin-bottom:1rem">
             Total elapsed: ${{elapsed}}</div>` : '';
         const links = jobId ? downloadLinks(jobId) : '';
         let html;
@@ -1191,7 +1234,7 @@ async def video_page(request: Request):
     function renderPrevRuns(runs) {{
         const el = document.getElementById('prev-runs');
         if (!runs || runs.length === 0) {{
-            el.innerHTML = '<div style="color:#333;font-size:0.8rem">No previous runs.</div>';
+            el.innerHTML = '<div style="color:var(--text-5);font-size:0.8rem">No previous runs.</div>';
             return;
         }}
         const rows = runs.map(r => {{
@@ -1208,22 +1251,22 @@ async def video_page(request: Request):
                 summary = `${{r.delta_e_wh}} Wh ${{r.confidence||''}}`;
             }}
             const base = '/results/video/' + r.job_id;
-            return `<div style="border-bottom:1px solid #111;padding:0.6rem 0">
+            return `<div style="border-bottom:1px solid var(--panel);padding:0.6rem 0">
                 <div style="display:flex;justify-content:space-between;align-items:baseline">
-                    <span style="color:#e0e0e0;font-size:0.82rem">${{date}}</span>
-                    <span style="color:#555;font-size:0.75rem;font-family:monospace">${{r.job_id}}</span>
+                    <span style="color:var(--text);font-size:0.82rem">${{date}}</span>
+                    <span style="color:var(--text-3);font-size:0.75rem;font-family:monospace">${{r.job_id}}</span>
                 </div>
-                <div style="color:#888;font-size:0.75rem;margin:0.1rem 0">${{codec}}</div>
-                <div style="color:#00ff99;font-size:0.8rem;margin:0.2rem 0">${{summary}}</div>
+                <div style="color:var(--text-3);font-size:0.75rem;margin:0.1rem 0">${{codec}}</div>
+                <div style="color:var(--accent);font-size:0.8rem;margin:0.2rem 0">${{summary}}</div>
                 <div style="display:flex;gap:0.5rem;margin-top:0.3rem">
                     <a href="${{base}}/download.json" download
-                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ JSON</a>
+                       style="color:var(--text-3);font-size:0.75rem;text-decoration:none">↓ JSON</a>
                     <a href="${{base}}/download.csv" download
-                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ CSV</a>
+                       style="color:var(--text-3);font-size:0.75rem;text-decoration:none">↓ CSV</a>
                 </div>
             </div>`;
         }}).join('');
-        el.innerHTML = `<div style="color:#444;font-size:0.72rem;text-transform:uppercase;
+        el.innerHTML = `<div style="color:var(--text-4);font-size:0.72rem;text-transform:uppercase;
             letter-spacing:0.05em;margin-bottom:0.75rem">Previous runs</div>${{rows}}`;
     }}
 
@@ -1413,21 +1456,21 @@ async def llm_page():
     models_html = "".join([
         f'''<div class="preset" id="model-{k}" onclick="selectModel('{k}')">
             <h3>{v["label"]}</h3>
-            <p style="color:#555;font-size:0.75rem">{v["params"]} · {v["size"]}</p>
+            <p style="color:var(--text-3);font-size:0.75rem">{v["params"]} · {v["size"]}</p>
         </div>'''
         for k, v in MODELS.items()
     ])
 
     tasks_html = "".join([
-        f'''<label style="display:flex;gap:0.75rem;border:1px solid #333;
+        f'''<label style="display:flex;gap:0.75rem;border:1px solid var(--border-3);
                      padding:0.75rem;cursor:pointer;margin-bottom:0.5rem">
             <input type="radio" name="task" value="{k}"
                    {"checked" if k == "T1" else ""}
                    onchange="selectedTask='{k}'; document.getElementById('promptText').value=defaultPrompts['{k}']||''"
-                   style="accent-color:#00ff99;margin-top:0.2rem">
+                   style="accent-color:var(--accent);margin-top:0.2rem">
             <div>
-                <div style="color:#e0e0e0;font-size:0.85rem">{v["label"]}</div>
-                <div style="color:#555;font-size:0.75rem">{v["prompt"][:80]}...</div>
+                <div style="color:var(--text);font-size:0.85rem">{v["label"]}</div>
+                <div style="color:var(--text-3);font-size:0.75rem">{v["prompt"][:80]}...</div>
             </div>
         </label>'''
         for k, v in TASKS.items()
@@ -1443,47 +1486,47 @@ async def llm_page():
   <title>WattLab — LLM Inference Test</title>
     <style>
         * {{ box-sizing:border-box; margin:0; padding:0; }}
-        body {{ font-family:monospace; background:#0a0a0a; color:#e0e0e0;
+        body {{ font-family:monospace; background:var(--bg); color:var(--text);
                max-width:780px; margin:0 auto; padding:2rem; }}
-        h1 {{ color:#00ff99; margin-bottom:0.25rem; font-size:1.6rem; }}
-        .subtitle {{ color:#555; font-size:0.8rem; margin-bottom:1.5rem; }}
-        .info {{ color:#777; font-size:0.82rem; margin-bottom:1.5rem;
+        h1 {{ color:var(--accent); margin-bottom:0.25rem; font-size:1.6rem; }}
+        .subtitle {{ color:var(--text-3); font-size:0.8rem; margin-bottom:1.5rem; }}
+        .info {{ color:var(--text-3); font-size:0.82rem; margin-bottom:1.5rem;
                  border-left:2px solid #222; padding-left:1rem; line-height:1.6; }}
         .presets {{ display:flex; gap:0.75rem; margin-bottom:1.5rem; }}
-        .preset {{ border:1px solid #333; padding:1rem; cursor:pointer; flex:1; }}
+        .preset {{ border:1px solid var(--border-3); padding:1rem; cursor:pointer; flex:1; }}
         .preset:hover {{ border-color:#00ff9966; }}
-        .preset.selected {{ border-color:#00ff99; background:#00ff9911; }}
-        .preset h3 {{ color:#00ff99; font-size:0.9rem; margin-bottom:0.4rem; }}
-        .section-label {{ color:#555; font-size:0.75rem; text-transform:uppercase;
+        .preset.selected {{ border-color:var(--accent); background:#00ff9911; }}
+        .preset h3 {{ color:var(--accent); font-size:0.9rem; margin-bottom:0.4rem; }}
+        .section-label {{ color:var(--text-3); font-size:0.75rem; text-transform:uppercase;
                           letter-spacing:0.05em; margin-bottom:0.75rem; }}
-        button {{ background:#00ff99; color:#000; border:none; padding:0.75rem 2rem;
+        button {{ background:var(--accent); color:#000; border:none; padding:0.75rem 2rem;
                   cursor:pointer; font-family:monospace; font-size:1rem; margin-top:1rem; }}
-        button:disabled {{ background:#222; color:#555; cursor:not-allowed; }}
-        button:hover:not(:disabled) {{ background:#00dd88; }}
+        button:disabled {{ background:var(--border); color:var(--text-3); cursor:not-allowed; }}
+        button:hover:not(:disabled) {{ background:var(--accent-hover); }}
         #status {{ margin-top:1.5rem; }}
-        .result-box {{ border:1px solid #222; padding:1.5rem; }}
-        .result-box h2 {{ color:#00ff99; font-size:1.1rem; margin-bottom:1rem;
-                          padding-bottom:0.5rem; border-bottom:1px solid #222; }}
+        .result-box {{ border:1px solid var(--border); padding:1.5rem; }}
+        .result-box h2 {{ color:var(--accent); font-size:1.1rem; margin-bottom:1rem;
+                          padding-bottom:0.5rem; border-bottom:1px solid var(--border); }}
         .metric {{ display:flex; justify-content:space-between;
-                   padding:0.3rem 0; border-bottom:1px solid #111; font-size:0.82rem; }}
-        .val {{ color:#00ff99; }}
-        .section-title {{ color:#444; font-size:0.72rem; text-transform:uppercase;
+                   padding:0.3rem 0; border-bottom:1px solid var(--panel); font-size:0.82rem; }}
+        .val {{ color:var(--accent); }}
+        .section-title {{ color:var(--text-4); font-size:0.72rem; text-transform:uppercase;
                           letter-spacing:0.05em; margin:0.75rem 0 0.4rem; }}
-        .response-box {{ background:#111; padding:1rem; margin-top:0.75rem;
-                         font-size:0.8rem; color:#aaa; line-height:1.6;
+        .response-box {{ background:var(--panel); padding:1rem; margin-top:0.75rem;
+                         font-size:0.8rem; color:var(--text-2); line-height:1.6;
                          border-left:2px solid #00ff9944; max-height:500px;
                          overflow-y:auto; white-space:pre-wrap; }}
-        .scope-note {{ color:#333; font-size:0.72rem; margin-top:1rem; }}
-        .progress-box {{ border:1px solid #222; padding:1.5rem; }}
-        .progress-header {{ color:#ffaa00; font-size:0.9rem; margin-bottom:1rem; }}
+        .scope-note {{ color:var(--text-5); font-size:0.72rem; margin-top:1rem; }}
+        .progress-box {{ border:1px solid var(--border); padding:1.5rem; }}
+        .progress-header {{ color:var(--warn); font-size:0.9rem; margin-bottom:1rem; }}
         .stage {{ display:flex; align-items:center; gap:0.75rem;
                   font-size:0.82rem; margin-bottom:0.4rem; }}
-        .stage.active .stage-label {{ color:#ffaa00; }}
-        .stage.done .stage-label {{ color:#00ff99; }}
-        .stage.pending .stage-label {{ color:#333; }}
-        a.back {{ color:#555; text-decoration:none; font-size:0.82rem;
+        .stage.active .stage-label {{ color:var(--warn); }}
+        .stage.done .stage-label {{ color:var(--accent); }}
+        .stage.pending .stage-label {{ color:var(--text-5); }}
+        a.back {{ color:var(--text-3); text-decoration:none; font-size:0.82rem;
                   display:inline-block; margin-top:1.5rem; }}
-        a.back:hover {{ color:#00ff99; }}
+        a.back:hover {{ color:var(--accent); }}
     </style>
 </head>
 <body>
@@ -1491,19 +1534,19 @@ async def llm_page():
     <h1>LLM Inference Energy Test</h1>
     <div class="subtitle">Greening of Streaming · WattLab · GoS1</div>
 
-    <div style="margin-bottom:1rem;font-size:0.78rem;color:#555">
-        First time here? <a href="/demo" style="color:#00ff99;text-decoration:none">Try the Guided Tour →</a>
+    <div style="margin-bottom:1rem;font-size:0.78rem;color:var(--text-3)">
+        First time here? <a href="/demo" style="color:var(--accent);text-decoration:none">Try the Guided Tour →</a>
     </div>
 
     <details style="margin-bottom:1.5rem;border-left:2px solid #222;padding-left:1rem">
-        <summary style="cursor:pointer;color:#888;font-size:0.82rem;list-style:none;outline:none">
-            ⓘ About this test <span style="color:#444;font-size:0.72rem">(click to expand)</span>
+        <summary style="cursor:pointer;color:var(--text-3);font-size:0.82rem;list-style:none;outline:none">
+            ⓘ About this test <span style="color:var(--text-4);font-size:0.72rem">(click to expand)</span>
         </summary>
-        <div style="color:#777;font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
+        <div style="color:var(--text-3);font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
             Run a language model on a fixed prompt and measure energy per token.<br>
             Models span small → large: TinyLlama 1.1B · Mistral 7B · Gemma 3 12B. CPU + ROCm GPU (via Ollama).<br>
             Cold mode unloads the model first; warm mode reuses a loaded model. Batch mode runs N inferences with a rest between.<br>
-            Primary metric: <strong style="color:#aaa">mWh per output token</strong> · P110 polled at 1s intervals.<br>
+            Primary metric: <strong style="color:var(--text-2)">mWh per output token</strong> · P110 polled at 1s intervals.<br>
             Scope: device layer only — no amortised training cost included.
         </div>
     </details>
@@ -1516,73 +1559,73 @@ async def llm_page():
 
     <div id="prompt-editor" style="margin-bottom:1.5rem">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.4rem">
-            <div style="color:#aaa;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">✎ Edit prompt</div>
-            <button onclick="resetPrompt()" style="background:none;border:none;color:#555;
+            <div style="color:var(--text-2);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em">✎ Edit prompt</div>
+            <button onclick="resetPrompt()" style="background:none;border:none;color:var(--text-3);
                 font-size:0.75rem;cursor:pointer;padding:0;font-family:monospace">Reset to default</button>
         </div>
         <textarea id="promptText" rows="3"
-            style="width:100%;background:#0f0f0f;border:1px solid #444;border-left:2px solid #00ff9966;
-                   color:#ccc;font-family:monospace;font-size:0.8rem;padding:0.75rem;
+            style="width:100%;background:#0f0f0f;border:1px solid var(--border-3);border-left:2px solid #00ff9966;
+                   color:var(--text-2);font-family:monospace;font-size:0.8rem;padding:0.75rem;
                    resize:vertical;line-height:1.5"></textarea>
     </div>
 
     <div style="display:flex;gap:2rem;margin-bottom:1.5rem;flex-wrap:wrap">
         <div>
-            <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+            <div style="color:var(--text-3);font-size:0.75rem;text-transform:uppercase;
                         letter-spacing:0.05em;margin-bottom:0.5rem">Backend</div>
             <div style="display:flex;gap:0.75rem">
                 <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
                     <input type="radio" name="device" value="gpu" checked
-                           onchange="selectedDevice='gpu'" style="accent-color:#00ff99"> GPU
+                           onchange="selectedDevice='gpu'" style="accent-color:var(--accent)"> GPU
                 </label>
                 <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
                     <input type="radio" name="device" value="cpu"
-                           onchange="selectedDevice='cpu'" style="accent-color:#00ff99"> CPU
+                           onchange="selectedDevice='cpu'" style="accent-color:var(--accent)"> CPU
                 </label>
                 <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
                     <input type="radio" name="device" value="both"
-                           onchange="selectedDevice='both'" style="accent-color:#00ff99"> Both ⚡
+                           onchange="selectedDevice='both'" style="accent-color:var(--accent)"> Both ⚡
                 </label>
             </div>
-            <div style="color:#333;font-size:0.72rem;margin-top:0.3rem">
+            <div style="color:var(--text-5);font-size:0.72rem;margin-top:0.3rem">
                 Both: CPU then GPU with new baseline — full side-by-side comparison
             </div>
         </div>
         <div>
-            <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+            <div style="color:var(--text-3);font-size:0.75rem;text-transform:uppercase;
                         letter-spacing:0.05em;margin-bottom:0.5rem">Mode</div>
             <div style="display:flex;gap:0.75rem">
                 <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
                     <input type="radio" name="warmMode" value="cold" checked
-                           onchange="selectedWarm=false" style="accent-color:#00ff99"> Cold
+                           onchange="selectedWarm=false" style="accent-color:var(--accent)"> Cold
                 </label>
                 <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
                     <input type="radio" name="warmMode" value="warm"
-                           onchange="selectedWarm=true" style="accent-color:#00ff99"> Warm
+                           onchange="selectedWarm=true" style="accent-color:var(--accent)"> Warm
                 </label>
             </div>
-            <div style="color:#333;font-size:0.72rem;margin-top:0.3rem">
+            <div style="color:var(--text-5);font-size:0.72rem;margin-top:0.3rem">
                 Cold: unload model before baseline · Warm: model stays loaded
             </div>
         </div>
         <div>
-            <div style="color:#555;font-size:0.75rem;text-transform:uppercase;
+            <div style="color:var(--text-3);font-size:0.75rem;text-transform:uppercase;
                         letter-spacing:0.05em;margin-bottom:0.5rem">Repeats</div>
             <div style="display:flex;gap:0.75rem">
                 <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
                     <input type="radio" name="repeats" value="1" checked
-                           onchange="selectedRepeats=1" style="accent-color:#00ff99"> 1×
+                           onchange="selectedRepeats=1" style="accent-color:var(--accent)"> 1×
                 </label>
                 <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
                     <input type="radio" name="repeats" value="3"
-                           onchange="selectedRepeats=3" style="accent-color:#00ff99"> 3×
+                           onchange="selectedRepeats=3" style="accent-color:var(--accent)"> 3×
                 </label>
                 <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem">
                     <input type="radio" name="repeats" value="5"
-                           onchange="selectedRepeats=5" style="accent-color:#00ff99"> 5×
+                           onchange="selectedRepeats=5" style="accent-color:var(--accent)"> 5×
                 </label>
             </div>
-            <div style="color:#333;font-size:0.72rem;margin-top:0.3rem">
+            <div style="color:var(--text-5);font-size:0.72rem;margin-top:0.3rem">
                 Batch: load once, 10s rest between runs
             </div>
         </div>
@@ -1591,13 +1634,13 @@ async def llm_page():
     <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
         <button id="runBtn" onclick="runInference()">Run Measurement</button>
         <button id="runAllBtn" onclick="runAllTasks()"
-            style="background:#0a0a0a;border:1px solid #00ff9966;color:#00ff99;
+            style="background:var(--bg);border:1px solid #00ff9966;color:var(--accent);
                    padding:0.65rem 1.25rem;font-family:monospace;font-size:0.85rem;cursor:pointer">
             Run All Tasks (T1+T2+T3)
         </button>
     </div>
     <div id="status"></div>
-    <div id="prev-runs" style="margin-top:2rem;border-top:1px solid #111;padding-top:1.5rem"></div>
+    <div id="prev-runs" style="margin-top:2rem;border-top:1px solid var(--panel);padding-top:1.5rem"></div>
 
     <script>
     let selectedModel = 'tinyllama';
@@ -1653,8 +1696,8 @@ async def llm_page():
             stagesHtml: wlStageList(stages.map(([k,l]) => l), stageIdx < 0 ? 0 : stageIdx),
             watts: watts,
             elapsed: startTime ? Date.now() - startTime : null,
-            extraHtml: '<div id="stream-preview" style="margin-top:0.75rem;background:#111;'
-                + 'padding:0.75rem;font-size:0.78rem;color:#888;line-height:1.6;'
+            extraHtml: '<div id="stream-preview" style="margin-top:0.75rem;background:var(--panel);'
+                + 'padding:0.75rem;font-size:0.78rem;color:var(--text-3);line-height:1.6;'
                 + 'min-height:2rem;border-left:2px solid #00ff9933;max-height:120px;'
                 + 'overflow-y:auto;white-space:pre-wrap"></div>',
         }});
@@ -1682,12 +1725,12 @@ async def llm_page():
                 pollLLM(data.job_id);
             }} else {{
                 document.getElementById('status').innerHTML =
-                    '<div style="color:#ff4400">Error: ' + JSON.stringify(data) + '</div>';
+                    '<div style="color:var(--err)">Error: ' + JSON.stringify(data) + '</div>';
                 btn.disabled = false;
             }}
         }} catch(e) {{
             document.getElementById('status').innerHTML =
-                '<div style="color:#ff4400">Failed: ' + e + '</div>';
+                '<div style="color:var(--err)">Failed: ' + e + '</div>';
             btn.disabled = false;
         }}
     }}
@@ -1707,7 +1750,7 @@ async def llm_page():
             }} else if (data.status === 'error') {{
                 if (streamTimer) {{ clearTimeout(streamTimer); streamTimer = null; }}
                 document.getElementById('status').innerHTML =
-                    '<div style="color:#ff4400">Error: ' + data.error + '</div>';
+                    '<div style="color:var(--err)">Error: ' + data.error + '</div>';
                 document.getElementById('runBtn').disabled = false;
             }} else if (data.stage === 'queued') {{
                 wlRenderQueued(data.queue_position);
@@ -1732,13 +1775,13 @@ async def llm_page():
         const base = '/results/llm/' + jobId;
         const links = jobId ? `<div style="margin-top:1rem;display:flex;gap:0.75rem">
             <a href="${{base}}/download.json" download
-               style="color:#00ff99;font-size:0.8rem;border:1px solid #00ff9944;
+               style="color:var(--accent);font-size:0.8rem;border:1px solid #00ff9944;
                       padding:0.3rem 0.75rem;text-decoration:none">↓ JSON</a>
             <a href="${{base}}/download.csv" download
-               style="color:#00ff99;font-size:0.8rem;border:1px solid #00ff9944;
+               style="color:var(--accent);font-size:0.8rem;border:1px solid #00ff9944;
                       padding:0.3rem 0.75rem;text-decoration:none">↓ CSV</a>
         </div>` : '';
-        const elapsedNote = elapsed ? `<div style="color:#444;font-size:0.78rem;margin-bottom:1rem">
+        const elapsedNote = elapsed ? `<div style="color:var(--text-4);font-size:0.78rem;margin-bottom:1rem">
             Total elapsed: ${{elapsed}}</div>` : '';
 
         let body;
@@ -1799,7 +1842,7 @@ async def llm_page():
             const e = run.energy;
             const i = run.inference;
             return `<tr>
-                <td style="color:#888">${{run.run}}</td>
+                <td style="color:var(--text-3)">${{run.run}}</td>
                 <td>${{i.output_tokens}}</td>
                 <td>${{i.tokens_per_sec}}</td>
                 <td>${{e.delta_e_wh}} Wh</td>
@@ -1826,7 +1869,7 @@ async def llm_page():
                     <span class="val">${{agg.tokens_per_sec_mean}}</span></div>
                 <div class="section-title">Per-run breakdown</div>
                 <table style="width:100%;border-collapse:collapse;font-size:0.78rem">
-                    <thead><tr style="color:#444;text-align:left">
+                    <thead><tr style="color:var(--text-4);text-align:left">
                         <th style="padding:0.3rem 0.5rem 0.3rem 0">#</th>
                         <th style="padding:0.3rem 0.5rem">Tokens</th>
                         <th style="padding:0.3rem 0.5rem">Tok/s</th>
@@ -1834,7 +1877,7 @@ async def llm_page():
                         <th style="padding:0.3rem 0.5rem">mWh/tok</th>
                         <th style="padding:0.3rem 0.5rem">Conf</th>
                     </tr></thead>
-                    <tbody style="color:#ccc">${{runsRows}}</tbody>
+                    <tbody style="color:var(--text-2)">${{runsRows}}</tbody>
                 </table>
                 <div class="section-title">Thermals</div>
                 <div class="metric"><span>CPU (start→end)</span>
@@ -1860,8 +1903,8 @@ async def llm_page():
               ${{a.finding}}
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.25rem">
-              <div style="border:1px solid #222;padding:1rem">
-                <div style="color:#888;font-size:0.72rem;margin-bottom:0.75rem">CPU (num_gpu=0 · Ryzen 9 7900)</div>
+              <div style="border:1px solid var(--border);padding:1rem">
+                <div style="color:var(--text-3);font-size:0.72rem;margin-bottom:0.75rem">CPU (num_gpu=0 · Ryzen 9 7900)</div>
                 <div class="metric"><span>Tokens/sec</span>
                   <span class="val" style="color:${{winnerColor(a.speed_winner,'CPU')}}">${{ci.tokens_per_sec}}</span></div>
                 <div class="metric"><span>Duration</span><span class="val">${{ci.duration_s}}s</span></div>
@@ -1872,8 +1915,8 @@ async def llm_page():
                 <div class="metric"><span>ΔW</span><span class="val">${{ce.delta_w}} W</span></div>
                 <div style="margin-top:0.5rem">${{ce.confidence.flag}} ${{ce.confidence.label}}</div>
               </div>
-              <div style="border:1px solid #222;padding:1rem">
-                <div style="color:#888;font-size:0.72rem;margin-bottom:0.75rem">GPU (ROCm · RX 7800 XT)</div>
+              <div style="border:1px solid var(--border);padding:1rem">
+                <div style="color:var(--text-3);font-size:0.72rem;margin-bottom:0.75rem">GPU (ROCm · RX 7800 XT)</div>
                 <div class="metric"><span>Tokens/sec</span>
                   <span class="val" style="color:${{winnerColor(a.speed_winner,'GPU')}}">${{gi.tokens_per_sec}}</span></div>
                 <div class="metric"><span>Duration</span><span class="val">${{gi.duration_s}}s</span></div>
@@ -1896,8 +1939,8 @@ async def llm_page():
         const cards = Object.entries(r.tasks).map(([key, t]) => {{
             const e = t.energy;
             const i = t.inference;
-            return `<div style="border:1px solid #222;padding:1rem;margin-bottom:0.75rem">
-                <div style="color:#00ff99;font-size:0.78rem;margin-bottom:0.75rem">${{key}} — ${{taskLabels[key] || key}}</div>
+            return `<div style="border:1px solid var(--border);padding:1rem;margin-bottom:0.75rem">
+                <div style="color:var(--accent);font-size:0.78rem;margin-bottom:0.75rem">${{key}} — ${{taskLabels[key] || key}}</div>
                 <div class="metric"><span>Output tokens</span><span class="val">${{i.output_tokens}}</span></div>
                 <div class="metric"><span>Tokens/sec</span><span class="val">${{i.tokens_per_sec}}</span></div>
                 <div class="metric"><span>Duration</span><span class="val">${{i.duration_s}}s</span></div>
@@ -1911,7 +1954,7 @@ async def llm_page():
         }}).join('');
         return `<div class="result-box">
             <h2>All Tasks — ${{r.model_label}} (${{r.model_params}})</h2>
-            <div style="color:#555;font-size:0.78rem;margin-bottom:1rem">
+            <div style="color:var(--text-3);font-size:0.78rem;margin-bottom:1rem">
                 ${{r.warm ? '🌡 Warm' : '❄ Cold'}} · ${{r.device.toUpperCase()}} · 3 tasks
             </div>
             ${{cards}}
@@ -1935,8 +1978,8 @@ async def llm_page():
             const gi = gpu.inference || {{}};
             const [cSpeedCol, gSpeedCol] = winCol(ci.tokens_per_sec, gi.tokens_per_sec, false);
             const [cECol, gECol] = winCol(ce.mwh_per_token, ge.mwh_per_token, true);
-            return `<tr style="border-bottom:1px solid #111">
-                <td style="padding:0.5rem 0.75rem 0.5rem 0;color:#888;font-size:0.78rem">${{tk}}<br><span style="font-size:0.7rem;color:#444">${{taskLabels[tk]}}</span></td>
+            return `<tr style="border-bottom:1px solid var(--panel)">
+                <td style="padding:0.5rem 0.75rem 0.5rem 0;color:var(--text-3);font-size:0.78rem">${{tk}}<br><span style="font-size:0.7rem;color:var(--text-4)">${{taskLabels[tk]}}</span></td>
                 <td style="padding:0.5rem 0.75rem;font-size:0.8rem;color:${{cSpeedCol}}">${{ci.tokens_per_sec ?? '—'}}</td>
                 <td style="padding:0.5rem 0.75rem;font-size:0.8rem;color:${{gSpeedCol}}">${{gi.tokens_per_sec ?? '—'}}</td>
                 <td style="padding:0.5rem 0.75rem;font-size:0.8rem;color:${{cECol}}">${{ce.mwh_per_token ?? '—'}}</td>
@@ -1946,9 +1989,9 @@ async def llm_page():
         }}).join('');
         return `<div class="result-box">
             <h2>All Tasks CPU vs GPU — ${{r.model_label}} (${{r.model_params}})</h2>
-            <div style="color:#555;font-size:0.78rem;margin-bottom:1rem">${{r.warm ? '🌡 Warm' : '❄ Cold'}} · 3 tasks × 2 backends</div>
+            <div style="color:var(--text-3);font-size:0.78rem;margin-bottom:1rem">${{r.warm ? '🌡 Warm' : '❄ Cold'}} · 3 tasks × 2 backends</div>
             <table style="width:100%;border-collapse:collapse">
-                <thead><tr style="color:#444;font-size:0.72rem;text-align:left;border-bottom:1px solid #222">
+                <thead><tr style="color:var(--text-4);font-size:0.72rem;text-align:left;border-bottom:1px solid var(--border)">
                     <th style="padding:0.4rem 0.75rem 0.4rem 0">Task</th>
                     <th style="padding:0.4rem 0.75rem">CPU tok/s</th>
                     <th style="padding:0.4rem 0.75rem">GPU tok/s</th>
@@ -1982,12 +2025,12 @@ async def llm_page():
                 pollLLMAll(data.job_id);
             }} else {{
                 document.getElementById('status').innerHTML =
-                    '<div style="color:#ff4400">Error: ' + JSON.stringify(data) + '</div>';
+                    '<div style="color:var(--err)">Error: ' + JSON.stringify(data) + '</div>';
                 btn.disabled = false; runBtn.disabled = false;
             }}
         }} catch(e) {{
             document.getElementById('status').innerHTML =
-                '<div style="color:#ff4400">Failed: ' + e + '</div>';
+                '<div style="color:var(--err)">Failed: ' + e + '</div>';
             btn.disabled = false; runBtn.disabled = false;
         }}
     }}
@@ -2008,7 +2051,7 @@ async def llm_page():
             }} else if (data.status === 'error') {{
                 if (streamTimer) {{ clearTimeout(streamTimer); streamTimer = null; }}
                 document.getElementById('status').innerHTML =
-                    '<div style="color:#ff4400">Error: ' + data.error + '</div>';
+                    '<div style="color:var(--err)">Error: ' + data.error + '</div>';
                 document.getElementById('runBtn').disabled = false;
                 document.getElementById('runAllBtn').disabled = false;
             }} else if (data.stage === 'queued') {{
@@ -2028,7 +2071,7 @@ async def llm_page():
                 wlRenderProgress({{
                     header: 'Running All Tasks \u2014 do not close this tab',
                     stagesHtml: '<div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">' + taskPips + '</div>'
-                        + '<div style="color:#888;font-size:0.8rem;margin-bottom:0.25rem">' + task + devBadge + '</div>',
+                        + '<div style="color:var(--text-3);font-size:0.8rem;margin-bottom:0.25rem">' + task + devBadge + '</div>',
                     watts: watts,
                     elapsed: startTime ? Date.now() - startTime : null,
                 }});
@@ -2050,28 +2093,28 @@ async def llm_page():
     function renderPrevRuns(runs) {{
         const el = document.getElementById('prev-runs');
         if (!runs || runs.length === 0) {{
-            el.innerHTML = '<div style="color:#333;font-size:0.8rem">No previous runs.</div>';
+            el.innerHTML = '<div style="color:var(--text-5);font-size:0.8rem">No previous runs.</div>';
             return;
         }}
         const rows = runs.map(r => {{
             const date = r.saved_at ? r.saved_at.slice(0,16).replace('T',' ') : '—';
             const summary = `${{r.model||''}} · ${{r.task||''}} · ${{r.mwh_per_token}} mWh/tok · ${{r.tokens_per_sec}} tok/s ${{r.confidence||''}}`;
             const base = '/results/llm/' + r.job_id;
-            return `<div style="border-bottom:1px solid #111;padding:0.6rem 0">
+            return `<div style="border-bottom:1px solid var(--panel);padding:0.6rem 0">
                 <div style="display:flex;justify-content:space-between;align-items:baseline">
-                    <span style="color:#e0e0e0;font-size:0.82rem">${{date}}</span>
-                    <span style="color:#555;font-size:0.75rem;font-family:monospace">${{r.job_id}}</span>
+                    <span style="color:var(--text);font-size:0.82rem">${{date}}</span>
+                    <span style="color:var(--text-3);font-size:0.75rem;font-family:monospace">${{r.job_id}}</span>
                 </div>
-                <div style="color:#00ff99;font-size:0.8rem;margin:0.2rem 0">${{summary}}</div>
+                <div style="color:var(--accent);font-size:0.8rem;margin:0.2rem 0">${{summary}}</div>
                 <div style="display:flex;gap:0.5rem;margin-top:0.3rem">
                     <a href="${{base}}/download.json" download
-                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ JSON</a>
+                       style="color:var(--text-3);font-size:0.75rem;text-decoration:none">↓ JSON</a>
                     <a href="${{base}}/download.csv" download
-                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ CSV</a>
+                       style="color:var(--text-3);font-size:0.75rem;text-decoration:none">↓ CSV</a>
                 </div>
             </div>`;
         }}).join('');
-        el.innerHTML = `<div style="color:#444;font-size:0.72rem;text-transform:uppercase;
+        el.innerHTML = `<div style="color:var(--text-4);font-size:0.72rem;text-transform:uppercase;
             letter-spacing:0.05em;margin-bottom:0.75rem">Previous runs</div>${{rows}}`;
     }}
 
@@ -2222,13 +2265,13 @@ async def rag_page():
     models_html = "".join([
         f'''<div class="preset" id="rmodel-{k}" onclick="selectRModel('{k}')">
             <h3>{v["label"]}</h3>
-            <p style="color:#555;font-size:0.75rem">{v["params"]} · {v["size"]}</p>
+            <p style="color:var(--text-3);font-size:0.75rem">{v["params"]} · {v["size"]}</p>
         </div>'''
         for k, v in rag_module.MODELS.items()
     ])
 
     queue_depth = len(pending_queue) + (1 if current_job_id else 0)
-    busy_banner = (f'<div style="background:#333;color:#ffaa00;padding:0.75rem 1rem;'
+    busy_banner = (f'<div style="background:var(--border-3);color:var(--warn);padding:0.75rem 1rem;'
                    f'margin-bottom:1rem;font-size:0.85rem">'
                    f'⏱ {queue_depth} job{"s" if queue_depth != 1 else ""} in queue — '
                    f'yours will be added and run automatically.</div>') \
@@ -2241,51 +2284,51 @@ async def rag_page():
   <title>WattLab — RAG Energy Test</title>
     <style>
         * {{ box-sizing:border-box; margin:0; padding:0; }}
-        body {{ font-family:monospace; background:#0a0a0a; color:#e0e0e0;
+        body {{ font-family:monospace; background:var(--bg); color:var(--text);
                max-width:780px; margin:0 auto; padding:2rem; }}
-        h1 {{ color:#00ff99; margin-bottom:0.25rem; font-size:1.6rem; }}
-        .subtitle {{ color:#555; font-size:0.8rem; margin-bottom:1.5rem; }}
-        .info {{ color:#777; font-size:0.82rem; margin-bottom:1.5rem;
+        h1 {{ color:var(--accent); margin-bottom:0.25rem; font-size:1.6rem; }}
+        .subtitle {{ color:var(--text-3); font-size:0.8rem; margin-bottom:1.5rem; }}
+        .info {{ color:var(--text-3); font-size:0.82rem; margin-bottom:1.5rem;
                  border-left:2px solid #222; padding-left:1rem; line-height:1.6; }}
         .presets {{ display:flex; gap:0.75rem; margin-bottom:1.5rem; }}
-        .preset {{ border:1px solid #333; padding:1rem; cursor:pointer; flex:1; }}
+        .preset {{ border:1px solid var(--border-3); padding:1rem; cursor:pointer; flex:1; }}
         .preset:hover {{ border-color:#00ff9966; }}
-        .preset.selected {{ border-color:#00ff99; background:#00ff9911; }}
-        .preset h3 {{ color:#00ff99; font-size:0.9rem; margin-bottom:0.4rem; }}
-        .section-label {{ color:#555; font-size:0.75rem; text-transform:uppercase;
+        .preset.selected {{ border-color:var(--accent); background:#00ff9911; }}
+        .preset h3 {{ color:var(--accent); font-size:0.9rem; margin-bottom:0.4rem; }}
+        .section-label {{ color:var(--text-3); font-size:0.75rem; text-transform:uppercase;
                           letter-spacing:0.05em; margin-bottom:0.75rem; }}
-        button {{ background:#00ff99; color:#000; border:none; padding:0.75rem 2rem;
+        button {{ background:var(--accent); color:#000; border:none; padding:0.75rem 2rem;
                   cursor:pointer; font-family:monospace; font-size:1rem; margin-top:1rem; }}
-        button:disabled {{ background:#222; color:#555; cursor:not-allowed; }}
-        button:hover:not(:disabled) {{ background:#00dd88; }}
+        button:disabled {{ background:var(--border); color:var(--text-3); cursor:not-allowed; }}
+        button:hover:not(:disabled) {{ background:var(--accent-hover); }}
         #status {{ margin-top:1.5rem; }}
-        .result-box {{ border:1px solid #222; padding:1.5rem; }}
-        .result-box h2 {{ color:#00ff99; font-size:1.1rem; margin-bottom:1rem;
-                          padding-bottom:0.5rem; border-bottom:1px solid #222; }}
+        .result-box {{ border:1px solid var(--border); padding:1.5rem; }}
+        .result-box h2 {{ color:var(--accent); font-size:1.1rem; margin-bottom:1rem;
+                          padding-bottom:0.5rem; border-bottom:1px solid var(--border); }}
         .metric {{ display:flex; justify-content:space-between;
-                   padding:0.3rem 0; border-bottom:1px solid #111; font-size:0.82rem; }}
-        .val {{ color:#00ff99; }}
-        .section-title {{ color:#444; font-size:0.72rem; text-transform:uppercase;
+                   padding:0.3rem 0; border-bottom:1px solid var(--panel); font-size:0.82rem; }}
+        .val {{ color:var(--accent); }}
+        .section-title {{ color:var(--text-4); font-size:0.72rem; text-transform:uppercase;
                           letter-spacing:0.05em; margin:0.75rem 0 0.4rem; }}
-        .response-box {{ background:#111; padding:1rem; margin-top:0.75rem;
-                         font-size:0.8rem; color:#aaa; line-height:1.6;
+        .response-box {{ background:var(--panel); padding:1rem; margin-top:0.75rem;
+                         font-size:0.8rem; color:var(--text-2); line-height:1.6;
                          border-left:2px solid #00ff9944; max-height:500px;
                          overflow-y:auto; white-space:pre-wrap; }}
-        .scope-note {{ color:#333; font-size:0.72rem; margin-top:1rem; }}
-        .progress-box {{ border:1px solid #222; padding:1.5rem; }}
-        .progress-header {{ color:#ffaa00; font-size:0.9rem; margin-bottom:1rem; }}
-        textarea {{ background:#111; border:1px solid #333; color:#e0e0e0;
+        .scope-note {{ color:var(--text-5); font-size:0.72rem; margin-top:1rem; }}
+        .progress-box {{ border:1px solid var(--border); padding:1.5rem; }}
+        .progress-header {{ color:var(--warn); font-size:0.9rem; margin-bottom:1rem; }}
+        textarea {{ background:var(--panel); border:1px solid var(--border-3); color:var(--text);
                     font-family:monospace; font-size:0.88rem; padding:0.75rem;
                     width:100%; resize:vertical; line-height:1.5; }}
         textarea:focus {{ border-color:#00ff9966; outline:none; }}
-        .mode-card {{ border:1px solid #333; padding:0.75rem 1rem; cursor:pointer;
+        .mode-card {{ border:1px solid var(--border-3); padding:0.75rem 1rem; cursor:pointer;
                       flex:1; transition:border-color 0.15s; }}
         .mode-card:hover {{ border-color:#00ff9966; }}
-        .mode-card.selected {{ border-color:#00ff99; background:#00ff9911; }}
-        .mode-card h4 {{ color:#00ff99; font-size:0.85rem; margin-bottom:0.2rem; }}
-        .mode-card p {{ color:#555; font-size:0.75rem; }}
-        .index-bar {{ border:1px solid #1a1a1a; padding:0.75rem 1rem;
-                      font-size:0.8rem; color:#555; margin-bottom:1.5rem;
+        .mode-card.selected {{ border-color:var(--accent); background:#00ff9911; }}
+        .mode-card h4 {{ color:var(--accent); font-size:0.85rem; margin-bottom:0.2rem; }}
+        .mode-card p {{ color:var(--text-3); font-size:0.75rem; }}
+        .index-bar {{ border:1px solid var(--border-2); padding:0.75rem 1rem;
+                      font-size:0.8rem; color:var(--text-3); margin-bottom:1.5rem;
                       display:flex; align-items:center; justify-content:space-between; gap:1rem; }}
         .index-dot {{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }}
     </style>
@@ -2296,17 +2339,17 @@ async def rag_page():
     <h1>RAG Energy Test</h1>
     <div class="subtitle">Greening of Streaming · WattLab · GoS1</div>
 
-    <div style="margin-bottom:1rem;font-size:0.78rem;color:#555">
-        First time here? <a href="/demo" style="color:#00ff99;text-decoration:none">Try the Guided Tour →</a>
+    <div style="margin-bottom:1rem;font-size:0.78rem;color:var(--text-3)">
+        First time here? <a href="/demo" style="color:var(--accent);text-decoration:none">Try the Guided Tour →</a>
     </div>
 
     <details style="margin-bottom:1.5rem;border-left:2px solid #222;padding-left:1rem">
-        <summary style="cursor:pointer;color:#888;font-size:0.82rem;list-style:none;outline:none">
-            ⓘ About this test <span style="color:#444;font-size:0.72rem">(click to expand)</span>
+        <summary style="cursor:pointer;color:var(--text-3);font-size:0.82rem;list-style:none;outline:none">
+            ⓘ About this test <span style="color:var(--text-4);font-size:0.72rem">(click to expand)</span>
         </summary>
-        <div style="color:#777;font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
+        <div style="color:var(--text-3);font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
             Retrieval-Augmented Generation (RAG) augments an LLM with chunks retrieved from a PDF corpus (ChromaDB + sentence-transformer embeddings).<br>
-            Compare three modes: <strong style="color:#aaa">baseline</strong> (no retrieval), <strong style="color:#aaa">RAG</strong> (top 3 chunks, 4096 ctx), <strong style="color:#aaa">RAG Large</strong> (top 8 chunks, 8192 ctx).<br>
+            Compare three modes: <strong style="color:var(--text-2)">baseline</strong> (no retrieval), <strong style="color:var(--text-2)">RAG</strong> (top 3 chunks, 4096 ctx), <strong style="color:var(--text-2)">RAG Large</strong> (top 8 chunks, 8192 ctx).<br>
             Use "Compare 3 modes" to run all three sequentially with fresh baselines — a side-by-side energy comparison for the same question.<br>
             Scope: device layer only — no network, no amortised training cost.
         </div>
@@ -2314,20 +2357,30 @@ async def rag_page():
 
     <div class="index-bar">
         <div style="display:flex;align-items:center;gap:0.6rem">
-            <div class="index-dot" id="index-dot" style="background:#333"></div>
+            <div class="index-dot" id="index-dot" style="background:var(--border-3)"></div>
             <span id="index-status-text">Checking index…</span>
         </div>
         <div style="display:flex;gap:0.5rem">
             <button id="buildBtn" onclick="buildIndex(false)"
-                    style="background:none;border:1px solid #333;color:#555;
+                    style="background:none;border:1px solid var(--border-3);color:var(--text-3);
                            font-size:0.75rem;padding:0.3rem 0.75rem;cursor:pointer;
                            font-family:monospace;margin-top:0">Build index</button>
             <button id="rebuildBtn" onclick="buildIndex(true)"
-                    style="background:none;border:1px solid #333;color:#555;
+                    style="background:none;border:1px solid var(--border-3);color:var(--text-3);
                            font-size:0.75rem;padding:0.3rem 0.75rem;cursor:pointer;
                            font-family:monospace;margin-top:0">Rebuild</button>
         </div>
     </div>
+
+    <details id="corpus-browser" style="margin-bottom:1.5rem;border:1px solid var(--border);padding:0.5rem 0.9rem;font-size:0.82rem"
+             ontoggle="if(this.open) loadCorpus();">
+      <summary style="cursor:pointer;color:var(--text-2);list-style:none">
+        <span id="corpus-summary-text">▸ Browse corpus documents</span>
+      </summary>
+      <div id="corpus-list" style="margin-top:0.6rem;color:var(--text-3);font-size:0.78rem;line-height:1.6">
+        <p style="color:var(--text-4)">Loading…</p>
+      </div>
+    </details>
 
     <div class="section-label">Model</div>
     <div class="presets">{models_html}</div>
@@ -2335,7 +2388,7 @@ async def rag_page():
     <div class="section-label">Retrieval mode</div>
     <div class="presets" style="margin-bottom:1.5rem">
         <div class="mode-card selected" id="rmode-baseline" onclick="selectRMode('baseline')">
-            <h4>Baseline</h4>
+            <h4>Without RAG</h4>
             <p>No retrieval. Cold LLM inference only.</p>
         </div>
         <div class="mode-card" id="rmode-rag" onclick="selectRMode('rag')">
@@ -2350,13 +2403,21 @@ async def rag_page():
 
     <div class="section-label">Question</div>
     <textarea id="questionText" rows="3"
-              placeholder="e.g. What is the energy cost of video streaming per GB transferred?"
-              style="margin-bottom:1.5rem"></textarea>
+              placeholder="What is REM (Remote Energy Measurement)?"
+              style="margin-bottom:0.5rem"></textarea>
+    <details style="margin-bottom:1.5rem;color:var(--text-3);font-size:0.78rem">
+      <summary style="cursor:pointer;color:var(--text-2)">ⓘ Why this question, and how to read the answers</summary>
+      <div style="padding:0.75rem 0;line-height:1.6">
+        <p style="margin-bottom:0.5rem"><strong>"What is REM?"</strong> is corpus-grounded — the GoS REM whitepaper is in the index but unlikely in any model's training data. So the answer should come <em>from</em> retrieval, not from prior knowledge. Good test of whether RAG is working.</p>
+        <p style="margin-bottom:0.5rem"><strong>What you'll see (2026-04-29 runs):</strong> all three model sizes retrieve the <em>same correct chunks</em>. But TinyLlama (1.1B) hallucinates "REM is a framework provided by the European Commission" — blending the GoS source with adjacent chunks. Gemma 3 (12B) and Phi-4 (14B) stay faithful and describe REM correctly as the GoS streaming-energy framework.</p>
+        <p><strong>The headline:</strong> RAG retrieval ≠ RAG quality. Smaller models can't faithfully read what they retrieve. Hallucination rate is a third axis on the energy/quality tradeoff — alongside speed and accuracy.</p>
+      </div>
+    </details>
 
     <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
         <button id="runBtn" onclick="startRag()">▶ Run single</button>
         <button id="compareBtn" onclick="startCompare()"
-                style="background:#111;border:1px solid #00ff99;color:#00ff99">
+                style="background:var(--panel);border:1px solid var(--accent);color:var(--accent)">
             ▶▶ Compare 3 modes
         </button>
     </div>
@@ -2417,6 +2478,42 @@ async def rag_page():
         }}
     }}
 
+    async function loadCorpus() {{
+        const el = document.getElementById('corpus-list');
+        const sumEl = document.getElementById('corpus-summary-text');
+        try {{
+            const r = await fetch('/rag/corpus-list');
+            const d = await r.json();
+            sumEl.textContent = '▾ Browse corpus documents — ' + d.total + ' PDFs (' + d.indexed + ' indexed)';
+            if (!d.docs || d.docs.length === 0) {{
+                el.innerHTML = '<p style="color:var(--text-4)">No PDFs found in the corpus directory.</p>';
+                return;
+            }}
+            // sort: pending first (so visitors notice), then alpha
+            d.docs.sort((a,b) => (a.indexed - b.indexed) || a.rel_path.localeCompare(b.rel_path));
+            const rows = d.docs.map(doc => {{
+                const flag = doc.indexed
+                    ? '<span style="color:var(--accent)">●</span>'
+                    : '<span style="color:var(--warn)">○</span>';
+                const tag = doc.indexed ? 'indexed' : 'pending — rebuild to add';
+                const sizeStr = doc.size_kb >= 1024
+                    ? (doc.size_kb / 1024).toFixed(1) + ' MB'
+                    : doc.size_kb + ' KB';
+                return '<div style="display:flex;align-items:baseline;gap:0.5rem;padding:0.15rem 0;border-bottom:1px solid var(--border-2)">'
+                    + '<span style="flex-shrink:0">' + flag + '</span>'
+                    + '<span style="flex:1;font-family:monospace;font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + doc.rel_path + '</span>'
+                    + '<span style="flex-shrink:0;color:var(--text-4);font-size:0.72rem">' + sizeStr + '</span>'
+                    + '<span style="flex-shrink:0;color:var(--text-4);font-size:0.72rem;width:11rem;text-align:right">' + tag + '</span>'
+                    + '</div>';
+            }}).join('');
+            el.innerHTML = '<div style="max-height:24rem;overflow-y:auto;padding-right:0.4rem">' + rows + '</div>'
+                + '<p style="color:var(--text-4);font-size:0.72rem;margin-top:0.5rem">'
+                + 'Add PDFs to <code>/home/gos/wattlab/corpus/papers/</code> (subdirectories are scanned). Hit <strong>Rebuild</strong> above to add pending docs to the index.</p>';
+        }} catch(e) {{
+            el.innerHTML = '<p style="color:var(--err)">Failed to load corpus: ' + e + '</p>';
+        }}
+    }}
+
     async function buildIndex(rebuild) {{
         const btn = rebuild ? document.getElementById('rebuildBtn') : document.getElementById('buildBtn');
         btn.disabled = true;
@@ -2439,7 +2536,7 @@ async def rag_page():
         const question = document.getElementById('questionText').value.trim();
         if (!question) {{
             document.getElementById('status').innerHTML =
-                '<div style="color:#ff4400;font-size:0.85rem;margin-top:1rem">Please enter a question.</div>';
+                '<div style="color:var(--err);font-size:0.85rem;margin-top:1rem">Please enter a question.</div>';
             return;
         }}
         document.getElementById('runBtn').disabled = true;
@@ -2456,17 +2553,17 @@ async def rag_page():
                 pollRag(data.job_id);
             }} else {{
                 document.getElementById('status').innerHTML =
-                    '<div style="color:#ff4400">Error: ' + JSON.stringify(data) + '</div>';
+                    '<div style="color:var(--err)">Error: ' + JSON.stringify(data) + '</div>';
                 document.getElementById('runBtn').disabled = false;
             }}
         }} catch(e) {{
             document.getElementById('status').innerHTML =
-                '<div style="color:#ff4400">Failed: ' + e + '</div>';
+                '<div style="color:var(--err)">Failed: ' + e + '</div>';
             document.getElementById('runBtn').disabled = false;
         }}
     }}
 
-    const RAG_STAGES = ['Baseline poll (10s)', 'Inference running', 'Complete'];
+    const RAG_STAGES = ['Baseline poll', 'Inference running', 'Complete'];
     const RAG_STAGE_IDX = {{baseline:0, inference:1, done:2}};
 
     function renderRagProgress(stage, watts) {{
@@ -2494,7 +2591,7 @@ async def rag_page():
             }} else if (data.stage === 'error' || data.error) {{
                 if (ragTimer) {{ clearTimeout(ragTimer); ragTimer = null; }}
                 document.getElementById('status').innerHTML =
-                    '<div style="color:#ff4400">Error: ' + (data.error||'unknown') + '</div>';
+                    '<div style="color:var(--err)">Error: ' + (data.error||'unknown') + '</div>';
                 document.getElementById('runBtn').disabled = false;
             }} else if (data.stage === 'queued') {{
                 wlRenderQueued(data.queue_position);
@@ -2512,11 +2609,11 @@ async def rag_page():
         const e = r.energy || {{}};
         const inf = r.inference || {{}};
         const conf = e.confidence || {{}};
-        const ragModeLabels = {{baseline:'Baseline (no retrieval)', rag:'RAG (top 3)', rag_large:'RAG Large (top 8)'}};
+        const ragModeLabels = {{baseline:'Without RAG (no retrieval)', rag:'RAG (top 3)', rag_large:'RAG Large (top 8)'}};
         const sourcesHtml = r.chunk_sources && r.chunk_sources.length
-            ? r.chunk_sources.map(s => `<span style="font-size:0.72rem;color:#555;
-                background:#111;padding:0.2rem 0.4rem;margin-right:0.3rem">${{s}}</span>`).join('')
-            : '<span style="color:#333;font-size:0.75rem">none</span>';
+            ? r.chunk_sources.map(s => `<span style="font-size:0.72rem;color:var(--text-3);
+                background:var(--panel);padding:0.2rem 0.4rem;margin-right:0.3rem">${{s}}</span>`).join('')
+            : '<span style="color:var(--text-5);font-size:0.75rem">none</span>';
         const retrievalHtml = r.rag_mode !== 'baseline' ? `
             <div class="section-title">Retrieval</div>
             <div class="metric"><span>Chunks retrieved</span><span class="val">${{r.chunks_retrieved}} / ${{r.top_k}}</span></div>
@@ -2530,7 +2627,7 @@ async def rag_page():
             <div class="result-box">
                 <h2>Result — ${{r.model_label}} · ${{ragModeLabels[r.rag_mode] || r.rag_mode}}</h2>
                 <div class="section-title">Question</div>
-                <div style="color:#aaa;font-size:0.82rem;margin-bottom:0.75rem">${{r.question}}</div>
+                <div style="color:var(--text-2);font-size:0.82rem;margin-bottom:0.75rem">${{r.question}}</div>
                 ${{retrievalHtml}}
                 <div class="section-title">Inference</div>
                 <div class="metric"><span>Output tokens</span><span class="val">${{inf.output_tokens}}</span></div>
@@ -2549,9 +2646,9 @@ async def rag_page():
                 <div class="scope-note">${{r.scope}}</div>
                 <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
                     <a href="/results/llm/${{jobId}}/download.json" download
-                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ JSON</a>
+                       style="color:var(--text-3);font-size:0.75rem;text-decoration:none">↓ JSON</a>
                     <a href="/results/llm/${{jobId}}/download.csv" download
-                       style="color:#555;font-size:0.75rem;text-decoration:none">↓ CSV</a>
+                       style="color:var(--text-3);font-size:0.75rem;text-decoration:none">↓ CSV</a>
                 </div>
             </div>`;
     }}
@@ -2562,7 +2659,7 @@ async def rag_page():
         const question = document.getElementById('questionText').value.trim();
         if (!question) {{
             document.getElementById('status').innerHTML =
-                '<div style="color:#ff4400;font-size:0.85rem;margin-top:1rem">Please enter a question.</div>';
+                '<div style="color:var(--err);font-size:0.85rem;margin-top:1rem">Please enter a question.</div>';
             return;
         }}
         document.getElementById('runBtn').disabled = true;
@@ -2579,13 +2676,13 @@ async def rag_page():
                 pollCompare(data.job_id);
             }} else {{
                 document.getElementById('status').innerHTML =
-                    '<div style="color:#ff4400">Error: ' + JSON.stringify(data) + '</div>';
+                    '<div style="color:var(--err)">Error: ' + JSON.stringify(data) + '</div>';
                 document.getElementById('runBtn').disabled = false;
                 document.getElementById('compareBtn').disabled = false;
             }}
         }} catch(e) {{
             document.getElementById('status').innerHTML =
-                '<div style="color:#ff4400">Failed: ' + e + '</div>';
+                '<div style="color:var(--err)">Failed: ' + e + '</div>';
             document.getElementById('runBtn').disabled = false;
             document.getElementById('compareBtn').disabled = false;
         }}
@@ -2593,7 +2690,7 @@ async def rag_page():
 
     function renderCompareProgress(partial, currentMode, watts) {{
         const MODES = ['baseline','rag','rag_large'];
-        const MODE_LABELS = {{baseline:'Baseline', rag:'RAG', rag_large:'RAG Large'}};
+        const MODE_LABELS = {{baseline:'Without RAG', rag:'RAG', rag_large:'RAG Large', cooldown:'⏱ Cooling down (heat dissipating)'}};
         const stagesHtml = MODES.map(m => {{
             const done = partial && partial[m];
             const active = m === currentMode && !done;
@@ -2602,7 +2699,7 @@ async def rag_page():
             let extra = '';
             if (done) {{
                 const e = partial[m].energy || {{}};
-                extra = ' <span style="color:#555;font-size:0.75rem">\u2014 '
+                extra = ' <span style="color:var(--text-3);font-size:0.75rem">\u2014 '
                     + (e.delta_w != null ? e.delta_w + ' W \xb7 ' : '')
                     + (e.mwh_per_token != null ? e.mwh_per_token + ' mWh/tok' : '')
                     + (e.confidence ? ' ' + e.confidence.flag : '')
@@ -2637,7 +2734,7 @@ async def rag_page():
             }} else if (data.stage === 'error' || data.error) {{
                 if (compareTimer) {{ clearTimeout(compareTimer); compareTimer = null; }}
                 document.getElementById('status').innerHTML =
-                    '<div style="color:#ff4400">Error: ' + (data.error||'unknown') + '</div>';
+                    '<div style="color:var(--err)">Error: ' + (data.error||'unknown') + '</div>';
                 document.getElementById('runBtn').disabled = false;
                 document.getElementById('compareBtn').disabled = false;
             }} else if (data.stage === 'queued') {{
@@ -2654,7 +2751,7 @@ async def rag_page():
 
     function renderCompareResult(r, jobId) {{
         const MODES = ['baseline','rag','rag_large'];
-        const MODE_LABELS = {{baseline:'Baseline (no retrieval)', rag:'RAG \u2014 top 3 chunks', rag_large:'RAG Large \u2014 top 8 chunks'}};
+        const MODE_LABELS = {{baseline:'Without RAG (no retrieval)', rag:'RAG \u2014 top 3 chunks', rag_large:'RAG Large \u2014 top 8 chunks'}};
         const STRIPE = {{baseline:'#444', rag:'#0088cc', rag_large:'#00ff99'}};
         const cards = MODES.map(m => {{
             const res = (r.results || {{}})[m];
@@ -2663,37 +2760,37 @@ async def rag_page():
             const inf = res.inference || {{}};
             const conf = e.confidence || {{}};
             const retrievalRow = m !== 'baseline'
-                ? '<div style="color:#555;font-size:0.78rem;margin:0.4rem 0">'
+                ? '<div style="color:var(--text-3);font-size:0.78rem;margin:0.4rem 0">'
                   + 'embed ' + res.embedding_ms + 'ms \xb7 search ' + res.retrieval_ms + 'ms \xb7 '
                   + res.chunks_retrieved + ' chunks</div>'
-                : '<div style="color:#333;font-size:0.78rem;margin:0.4rem 0">No retrieval</div>';
+                : '<div style="color:var(--text-5);font-size:0.78rem;margin:0.4rem 0">No retrieval</div>';
             const answerId = 'ans-' + m + '-' + jobId;
-            return '<div style="border:1px solid #222;border-left:3px solid ' + STRIPE[m] + ';padding:1.25rem;margin-bottom:0.75rem">'
-                + '<div style="font-size:0.9rem;color:#e0e0e0;margin-bottom:0.5rem">' + MODE_LABELS[m] + '</div>'
+            return '<div style="border:1px solid var(--border);border-left:3px solid ' + STRIPE[m] + ';padding:1.25rem;margin-bottom:0.75rem">'
+                + '<div style="font-size:0.9rem;color:var(--text);margin-bottom:0.5rem">' + MODE_LABELS[m] + '</div>'
                 + retrievalRow
                 + '<div style="display:flex;gap:1.5rem;font-size:0.82rem;flex-wrap:wrap;margin-bottom:0.5rem">'
-                + '<span>\u0394W <span style="color:#00ff99">' + e.delta_w + ' W</span></span>'
-                + '<span>\u0394E <span style="color:#00ff99">' + e.delta_e_wh + ' Wh</span></span>'
-                + '<span>mWh/tok <span style="color:#00ff99">' + (e.mwh_per_token ?? '\u2014') + '</span></span>'
+                + '<span>\u0394W <span style="color:var(--accent)">' + e.delta_w + ' W</span></span>'
+                + '<span>\u0394E <span style="color:var(--accent)">' + e.delta_e_wh + ' Wh</span></span>'
+                + '<span>mWh/tok <span style="color:var(--accent)">' + (e.mwh_per_token ?? '\u2014') + '</span></span>'
                 + '<span>' + inf.tokens_per_sec + ' tok/s</span>'
                 + '<span class="conf-badge">' + (conf.flag||'') + ' ' + (conf.label||'') + '</span>'
                 + '</div>'
-                + '<div style="font-size:0.75rem;color:#555;margin-bottom:0.4rem;cursor:pointer" '
+                + '<div style="font-size:0.75rem;color:var(--text-3);margin-bottom:0.4rem;cursor:pointer" '
                 + 'data-id="' + answerId + '" onclick="toggleAns(this.dataset.id)">'
                 + '\u25b6 Show / hide answer</div>'
-                + '<div id="' + answerId + '" style="display:none;background:#111;padding:0.75rem;'
-                + 'font-size:0.78rem;color:#aaa;line-height:1.6;white-space:pre-wrap;max-height:300px;overflow-y:auto;'
+                + '<div id="' + answerId + '" style="display:none;background:var(--panel);padding:0.75rem;'
+                + 'font-size:0.78rem;color:var(--text-2);line-height:1.6;white-space:pre-wrap;max-height:300px;overflow-y:auto;'
                 + 'border-left:2px solid ' + STRIPE[m] + '44">' + (inf.response || '') + '</div>'
                 + '</div>';
         }}).join('');
         document.getElementById('status').innerHTML =
-            '<div style="border:1px solid #222;padding:1.5rem">'
-            + '<div style="color:#00ff99;font-size:1.1rem;margin-bottom:0.25rem">Comparison \u2014 ' + r.model_label + '</div>'
-            + '<div style="color:#555;font-size:0.82rem;margin-bottom:1rem">' + r.question + '</div>'
+            '<div style="border:1px solid var(--border);padding:1.5rem">'
+            + '<div style="color:var(--accent);font-size:1.1rem;margin-bottom:0.25rem">Comparison \u2014 ' + r.model_label + '</div>'
+            + '<div style="color:var(--text-3);font-size:0.82rem;margin-bottom:1rem">' + r.question + '</div>'
             + cards
-            + '<div style="color:#333;font-size:0.72rem;margin-top:0.75rem">' + (r.scope||'') + '</div>'
+            + '<div style="color:var(--text-5);font-size:0.72rem;margin-top:0.75rem">' + (r.scope||'') + '</div>'
             + '<div style="display:flex;gap:0.5rem;margin-top:0.75rem">'
-            + '<a href="/results/llm/' + jobId + '/download.json" download style="color:#555;font-size:0.75rem;text-decoration:none">\u2193 JSON</a>'
+            + '<a href="/results/llm/' + jobId + '/download.json" download style="color:var(--text-3);font-size:0.75rem;text-decoration:none">\u2193 JSON</a>'
             + '</div></div>';
     }}
 
@@ -2711,24 +2808,24 @@ async def rag_page():
     function renderPrevRuns(runs) {{
         const el = document.getElementById('prev-runs');
         if (!runs || runs.length === 0) {{
-            el.innerHTML = '<div style="color:#333;font-size:0.8rem">No previous RAG runs.</div>';
+            el.innerHTML = '<div style="color:var(--text-5);font-size:0.8rem">No previous RAG runs.</div>';
             return;
         }}
         const rows = runs.map(r => {{
             const date = r.saved_at ? r.saved_at.slice(0,16).replace('T',' ') : '\u2014';
             const summary = (r.model||'') + ' \xb7 ' + (r.task||'') + ' \xb7 ' + r.mwh_per_token + ' mWh/tok ' + (r.confidence||'');
             const base = '/results/llm/' + r.job_id;
-            return '<div style="border-bottom:1px solid #111;padding:0.6rem 0">'
+            return '<div style="border-bottom:1px solid var(--panel);padding:0.6rem 0">'
                 + '<div style="display:flex;justify-content:space-between;align-items:baseline">'
-                + '<span style="color:#e0e0e0;font-size:0.82rem">' + date + '</span>'
-                + '<span style="color:#555;font-size:0.75rem;font-family:monospace">' + r.job_id + '</span></div>'
-                + '<div style="color:#00ff99;font-size:0.8rem;margin:0.2rem 0">' + summary + '</div>'
+                + '<span style="color:var(--text);font-size:0.82rem">' + date + '</span>'
+                + '<span style="color:var(--text-3);font-size:0.75rem;font-family:monospace">' + r.job_id + '</span></div>'
+                + '<div style="color:var(--accent);font-size:0.8rem;margin:0.2rem 0">' + summary + '</div>'
                 + '<div style="display:flex;gap:0.5rem;margin-top:0.3rem">'
-                + '<a href="' + base + '/download.json" download style="color:#555;font-size:0.75rem;text-decoration:none">\u2193 JSON</a>'
-                + '<a href="' + base + '/download.csv" download style="color:#555;font-size:0.75rem;text-decoration:none">\u2193 CSV</a>'
+                + '<a href="' + base + '/download.json" download style="color:var(--text-3);font-size:0.75rem;text-decoration:none">\u2193 JSON</a>'
+                + '<a href="' + base + '/download.csv" download style="color:var(--text-3);font-size:0.75rem;text-decoration:none">\u2193 CSV</a>'
                 + '</div></div>';
         }}).join('');
-        el.innerHTML = '<div style="color:#444;font-size:0.72rem;text-transform:uppercase;'
+        el.innerHTML = '<div style="color:var(--text-4);font-size:0.72rem;text-transform:uppercase;'
             + 'letter-spacing:0.05em;margin-bottom:0.75rem">Previous RAG runs</div>' + rows;
     }}
 
@@ -2750,6 +2847,16 @@ async def rag_index_status():
         "status": rag_module.index_status,
         "doc_count": rag_module.index_doc_count,
         "error": rag_module.index_error,
+    }
+
+
+@app.get("/rag/corpus-list")
+async def rag_corpus_list():
+    docs = rag_module.corpus_list()
+    return {
+        "docs": docs,
+        "total": len(docs),
+        "indexed": sum(1 for d in docs if d["indexed"]),
     }
 
 
@@ -2801,16 +2908,25 @@ async def rag_job_status(job_id: str):
 
 
 async def run_rag_compare_job(job_id: str, model_key: str, question: str):
+    s = cfg.load()
     partial_results = {}
+    modes = ("baseline", "rag", "rag_large")
     try:
-        for rag_mode in ("baseline", "rag", "rag_large"):
+        for i, rag_mode in enumerate(modes):
             jobs[job_id]["current_mode"] = rag_mode
-            jobs[job_id]["stage"] = rag_mode
+            jobs[job_id]["mode_index"] = i
             jobs[job_id]["partial_results"] = dict(partial_results)
             result = await rag_module.run_rag_measurement(
                 model_key, rag_mode, question, jobs, job_id)
             partial_results[rag_mode] = result
             jobs[job_id]["partial_results"] = dict(partial_results)
+            # Cooldown between modes — lets residual heat dissipate so the next
+            # mode's baseline is measured on a cool system. Without this, a
+            # short-running mode after a long one shows negative ΔW (the
+            # baseline is contaminated by the previous mode's heat).
+            if i < len(modes) - 1:
+                jobs[job_id]["current_mode"] = "cooldown"
+                await asyncio.sleep(s["llm_rest_s"])
 
         final = {
             "mode": "rag_compare",
@@ -2911,18 +3027,18 @@ async def settings_page(request: Request):
         step_attr = f' step="{step}"' if step else ""
         if local:
             ctrl = (f'<input type="number" id="{fid}" min="{min_}" max="{max_}"{step_attr}'
-                    f' value="{val}" style="background:#111;border:1px solid #333;color:#e0e0e0;'
+                    f' value="{val}" style="background:var(--panel);border:1px solid var(--border-3);color:var(--text);'
                     f'font-family:monospace;font-size:0.9rem;padding:0.3rem 0.5rem;'
                     f'width:80px;text-align:right">')
         else:
-            ctrl = f'<span style="font-family:monospace;color:#00ff99;font-size:0.95rem">{val}</span>'
-        hint_html = f'<div style="color:#333;font-size:0.72rem;margin-top:0.2rem">{hint}</div>' if hint else ""
+            ctrl = f'<span style="font-family:monospace;color:var(--accent);font-size:0.95rem">{val}</span>'
+        hint_html = f'<div style="color:var(--text-5);font-size:0.72rem;margin-top:0.2rem">{hint}</div>' if hint else ""
         return (f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
-                f'padding:0.5rem 0;border-bottom:1px solid #0d0d0d;gap:1rem">'
-                f'<div><label style="color:#aaa;font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
+                f'padding:0.5rem 0;border-bottom:1px solid var(--panel-2);gap:1rem">'
+                f'<div><label style="color:var(--text-2);font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
                 f'{hint_html}</div>'
                 f'<div style="display:flex;align-items:baseline;gap:0.5rem">'
-                f'{ctrl}<span style="color:#555;font-size:0.8rem">{unit}</span>'
+                f'{ctrl}<span style="color:var(--text-3);font-size:0.8rem">{unit}</span>'
                 f'</div></div>')
 
     def slider_field(fid, val, min_, max_, step, unit, hint=""):
@@ -2930,53 +3046,53 @@ async def settings_page(request: Request):
             ctrl = (f'<input type="range" id="{fid}" min="{min_}" max="{max_}" step="{step}"'
                     f' value="{val}"'
                     f' oninput="document.getElementById(\'{fid}_disp\').textContent=this.value"'
-                    f' style="width:130px;accent-color:#00ff99;vertical-align:middle"> '
-                    f'<span id="{fid}_disp" style="font-family:monospace;color:#00ff99;'
+                    f' style="width:130px;accent-color:var(--accent);vertical-align:middle"> '
+                    f'<span id="{fid}_disp" style="font-family:monospace;color:var(--accent);'
                     f'font-size:0.9rem;min-width:2.5rem;display:inline-block">{val}</span>')
         else:
-            ctrl = f'<span style="font-family:monospace;color:#00ff99;font-size:0.95rem">{val}</span>'
-        hint_html = f'<div style="color:#333;font-size:0.72rem;margin-top:0.2rem">{hint}</div>' if hint else ""
+            ctrl = f'<span style="font-family:monospace;color:var(--accent);font-size:0.95rem">{val}</span>'
+        hint_html = f'<div style="color:var(--text-5);font-size:0.72rem;margin-top:0.2rem">{hint}</div>' if hint else ""
         return (f'<div style="display:flex;justify-content:space-between;align-items:center;'
-                f'padding:0.5rem 0;border-bottom:1px solid #0d0d0d;gap:1rem">'
-                f'<div><label style="color:#aaa;font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
+                f'padding:0.5rem 0;border-bottom:1px solid var(--panel-2);gap:1rem">'
+                f'<div><label style="color:var(--text-2);font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
                 f'{hint_html}</div>'
                 f'<div style="display:flex;align-items:center;gap:0.5rem">'
-                f'{ctrl}<span style="color:#555;font-size:0.8rem">{unit}</span>'
+                f'{ctrl}<span style="color:var(--text-3);font-size:0.8rem">{unit}</span>'
                 f'</div></div>')
 
     def textarea_field(fid, val, hint="", rows=3):
         if local:
             ctrl = (f'<textarea id="{fid}" rows="{rows}" spellcheck="false"'
-                    f' style="width:100%;background:#0d0d0d;border:1px solid #222;'
-                    f'color:#888;font-family:monospace;font-size:0.72rem;'
+                    f' style="width:100%;background:var(--panel-2);border:1px solid var(--border);'
+                    f'color:var(--text-3);font-family:monospace;font-size:0.72rem;'
                     f'padding:0.4rem 0.5rem;resize:vertical;line-height:1.5">{val}</textarea>')
         else:
-            ctrl = (f'<div style="background:#0d0d0d;border:1px solid #1a1a1a;padding:0.4rem 0.5rem;'
-                    f'font-family:monospace;font-size:0.72rem;color:#444;word-break:break-all;'
+            ctrl = (f'<div style="background:var(--panel-2);border:1px solid var(--border-2);padding:0.4rem 0.5rem;'
+                    f'font-family:monospace;font-size:0.72rem;color:var(--text-4);word-break:break-all;'
                     f'line-height:1.5">{val}</div>')
-        hint_html = f'<div style="color:#333;font-size:0.72rem;margin-top:0.2rem;margin-bottom:0.3rem">{hint}</div>' if hint else ""
-        return (f'<div style="padding:0.5rem 0;border-bottom:1px solid #0d0d0d">'
-                f'<label style="color:#aaa;font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
+        hint_html = f'<div style="color:var(--text-5);font-size:0.72rem;margin-top:0.2rem;margin-bottom:0.3rem">{hint}</div>' if hint else ""
+        return (f'<div style="padding:0.5rem 0;border-bottom:1px solid var(--panel-2)">'
+                f'<label style="color:var(--text-2);font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
                 f'{hint_html}{ctrl}</div>')
 
     def calib_field(fid, val, hint=""):
         disp = f"{val:.2f} %" if val is not None else "—"
         color = "#00ff99" if val is not None else "#333"
-        hint_html = f'<div style="color:#333;font-size:0.72rem;margin-top:0.1rem">{hint}</div>' if hint else ""
+        hint_html = f'<div style="color:var(--text-5);font-size:0.72rem;margin-top:0.1rem">{hint}</div>' if hint else ""
         return (f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
-                f'padding:0.5rem 0;border-bottom:1px solid #0d0d0d;gap:1rem">'
-                f'<div><label style="color:#666;font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
+                f'padding:0.5rem 0;border-bottom:1px solid var(--panel-2);gap:1rem">'
+                f'<div><label style="color:var(--text-4);font-size:0.85rem">{fid.replace("_"," ").title()}</label>'
                 f'{hint_html}</div>'
                 f'<div style="display:flex;align-items:baseline;gap:0.5rem">'
                 f'<span style="font-family:monospace;color:{color};font-size:0.95rem">{disp}</span>'
                 f'</div></div>')
 
     notice = ('' if local else
-              '<div style="background:#111;border-left:3px solid #555;padding:0.75rem 1rem;'
-              'margin-bottom:1.5rem;font-size:0.82rem;color:#555">'
+              '<div style="background:var(--panel);border-left:3px solid #555;padding:0.75rem 1rem;'
+              'margin-bottom:1.5rem;font-size:0.82rem;color:var(--text-3)">'
               '🔒 Read-only — settings can only be modified from the lab network or SSH tunnel.'
               '</div>')
-    save_block = ('<button onclick="saveSettings()" style="background:#00ff99;color:#000;border:none;'
+    save_block = ('<button onclick="saveSettings()" style="background:var(--accent);color:#000;border:none;'
                   'padding:0.75rem 2rem;cursor:pointer;font-family:monospace;font-size:1rem;margin-top:2rem">'
                   'Save Settings</button><div id="msg" style="margin-top:1rem;font-size:0.85rem"></div>'
                   if local else '')
@@ -2989,14 +3105,14 @@ async def settings_page(request: Request):
   <title>WattLab — Settings</title>
     <style>
         * {{ box-sizing:border-box; margin:0; padding:0; }}
-        body {{ font-family:monospace; background:#0a0a0a; color:#e0e0e0;
+        body {{ font-family:monospace; background:var(--bg); color:var(--text);
                max-width:600px; margin:0 auto; padding:2rem; }}
-        h1 {{ color:#00ff99; margin-bottom:0.25rem; font-size:1.6rem; }}
-        .subtitle {{ color:#555; font-size:0.8rem; margin-bottom:2rem; }}
-        .section {{ color:#444; font-size:0.72rem; text-transform:uppercase;
+        h1 {{ color:var(--accent); margin-bottom:0.25rem; font-size:1.6rem; }}
+        .subtitle {{ color:var(--text-3); font-size:0.8rem; margin-bottom:2rem; }}
+        .section {{ color:var(--text-4); font-size:0.72rem; text-transform:uppercase;
                     letter-spacing:0.05em; margin:1.5rem 0 0.75rem;
-                    padding-bottom:0.4rem; border-bottom:1px solid #111; }}
-        input[type=number]:focus {{ border-color:#00ff99; outline:none; }}
+                    padding-bottom:0.4rem; border-bottom:1px solid var(--panel); }}
+        input[type=number]:focus {{ border-color:var(--accent); outline:none; }}
     </style>
 </head>
 <body>
@@ -3012,7 +3128,7 @@ async def settings_page(request: Request):
     {field("llm_unload_settle_s", s['llm_unload_settle_s'], 1, 30, "s",   "wait after model unload before baseline")}
 
     <div class="section">Encoding targets</div>
-    <div style="color:#444;font-size:0.75rem;line-height:1.6;margin-bottom:0.75rem">
+    <div style="color:var(--text-4);font-size:0.75rem;line-height:1.6;margin-bottom:0.75rem">
       ABR target bitrate applied to both CPU and GPU presets for each codec — ensures apples-to-apples energy comparison. Custom ffmpeg commands on the video page override these.
     </div>
     {field("h264_bitrate_kbps", s['h264_bitrate_kbps'], 500, 20000, "kbps", "H.264 target bitrate (libx264 + h264_vaapi)", step=100)}
@@ -3030,7 +3146,7 @@ async def settings_page(request: Request):
     {field("conf_yellow_polls",s['conf_yellow_polls'], 1, 50,  "polls", "🟡 minimum poll count")}
 
     <div class="section">Variance calibration</div>
-    <div style="color:#444;font-size:0.75rem;line-height:1.6;margin-bottom:0.75rem">
+    <div style="color:var(--text-4);font-size:0.75rem;line-height:1.6;margin-bottom:0.75rem">
       Runs H.264 CPU then H.265 GPU on Meridian N times. Computes three coefficients of
       variation: idle (raw P110 baseline readings), CPU (ΔW per H264 run), GPU (ΔW per H265 run).
       Their mean is written to Variance % above. Queue is blocked for the duration.
@@ -3039,7 +3155,7 @@ async def settings_page(request: Request):
     {slider_field("variance_cooldown_s",s['variance_cooldown_s'],10, 300, 10, "s",       "cooldown between each run pair")}
     {textarea_field("variance_cpu_cmd", s['variance_cpu_cmd'], "H.264 CPU command — {input} and {output} are substituted at runtime")}
     {textarea_field("variance_gpu_cmd", s['variance_gpu_cmd'], "H.265 GPU command — {input} and {output} are substituted at runtime")}
-    {'<button onclick="runVarianceCalibration()" id="varCalBtn" style="background:#222;color:#00ff99;border:1px solid #00ff9944;padding:0.5rem 1.25rem;cursor:pointer;font-family:monospace;font-size:0.85rem;margin-top:0.75rem">▶ Run variance calibration</button><div id="var-cal-msg" style="margin-top:0.5rem;font-size:0.82rem"></div>' if local else '<div style="color:#333;font-size:0.78rem;margin-top:0.5rem">Calibration requires lab access.</div>'}
+    {'<button onclick="runVarianceCalibration()" id="varCalBtn" style="background:var(--border);color:var(--accent);border:1px solid #00ff9944;padding:0.5rem 1.25rem;cursor:pointer;font-family:monospace;font-size:0.85rem;margin-top:0.75rem">▶ Run variance calibration</button><div id="var-cal-msg" style="margin-top:0.5rem;font-size:0.82rem"></div>' if local else '<div style="color:var(--text-5);font-size:0.78rem;margin-top:0.5rem">Calibration requires lab access.</div>'}
 
     {save_block}
     <script>
@@ -3068,14 +3184,14 @@ async def settings_page(request: Request):
             const data = await resp.json();
             if (data.ok) {{
                 document.getElementById('msg').innerHTML =
-                    '<span style="color:#00ff99">✓ Saved.</span>';
+                    '<span style="color:var(--accent)">✓ Saved.</span>';
             }} else {{
                 document.getElementById('msg').innerHTML =
-                    '<span style="color:#ff4400">Error: ' + JSON.stringify(data) + '</span>';
+                    '<span style="color:var(--err)">Error: ' + JSON.stringify(data) + '</span>';
             }}
         }} catch(e) {{
             document.getElementById('msg').innerHTML =
-                '<span style="color:#ff4400">Failed: ' + e + '</span>';
+                '<span style="color:var(--err)">Failed: ' + e + '</span>';
         }}
     }}
 
@@ -3084,23 +3200,23 @@ async def settings_page(request: Request):
         const msg = document.getElementById('var-cal-msg');
         if (!btn) return;
         btn.disabled = true;
-        msg.innerHTML = '<span style="color:#ffaa00">Saving settings…</span>';
+        msg.innerHTML = '<span style="color:var(--warn)">Saving settings…</span>';
         await saveSettings();
-        msg.innerHTML = '<span style="color:#ffaa00">Queuing calibration job…</span>';
+        msg.innerHTML = '<span style="color:var(--warn)">Queuing calibration job…</span>';
         try {{
             const resp = await fetch('/variance/run', {{method: 'POST'}});
             const data = await resp.json();
             if (data.job_id) {{
-                msg.innerHTML = '<span style="color:#00ff99">Job ' + data.job_id
+                msg.innerHTML = '<span style="color:var(--accent)">Job ' + data.job_id
                     + ' queued (position ' + data.queue_position + '). '
-                    + '<a href="/queue-status" style="color:#00ff99">View queue →</a>'
+                    + '<a href="/queue-status" style="color:var(--accent)">View queue →</a>'
                     + '</span>';
             }} else {{
-                msg.innerHTML = '<span style="color:#ff4400">Error: ' + JSON.stringify(data) + '</span>';
+                msg.innerHTML = '<span style="color:var(--err)">Error: ' + JSON.stringify(data) + '</span>';
                 btn.disabled = false;
             }}
         }} catch(e) {{
-            msg.innerHTML = '<span style="color:#ff4400">Failed: ' + e + '</span>';
+            msg.innerHTML = '<span style="color:var(--err)">Failed: ' + e + '</span>';
             btn.disabled = false;
         }}
     }}
@@ -3127,23 +3243,23 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 <title>WattLab — Guided Tour · Greening of Streaming</title>
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
-  body{{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0a;
-       color:#e0e0e0;max-width:840px;margin:0 auto;padding:2rem}}
-  h1{{font-family:monospace;color:#00ff99;font-size:1.5rem;margin-bottom:0.25rem}}
-  h2{{font-family:monospace;color:#00ff99;font-size:1.1rem;margin-bottom:0.75rem}}
+  body{{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);
+       color:var(--text);max-width:840px;margin:0 auto;padding:2rem}}
+  h1{{font-family:monospace;color:var(--accent);font-size:1.5rem;margin-bottom:0.25rem}}
+  h2{{font-family:monospace;color:var(--accent);font-size:1.1rem;margin-bottom:0.75rem}}
   .mono{{font-family:monospace}}
-  .dim{{color:#555}}
-  .accent{{color:#00ff99}}
+  .dim{{color:var(--text-3)}}
+  .accent{{color:var(--accent)}}
 
   /* Step nav */
   .step-nav{{display:flex;align-items:center;gap:0.5rem;margin-bottom:2.5rem;
-             font-family:monospace;font-size:0.78rem;color:#333}}
-  .step-nav .dot{{width:8px;height:8px;border-radius:50%;background:#222;
+             font-family:monospace;font-size:0.78rem;color:var(--text-5)}}
+  .step-nav .dot{{width:8px;height:8px;border-radius:50%;background:var(--border);
                   transition:background 0.3s}}
   .step-nav .dot.done{{background:#00ff9966}}
-  .step-nav .dot.active{{background:#00ff99}}
-  .step-nav .label{{color:#555;font-size:0.72rem}}
-  .step-nav .label.active{{color:#00ff99}}
+  .step-nav .dot.active{{background:var(--accent)}}
+  .step-nav .label{{color:var(--text-3);font-size:0.72rem}}
+  .step-nav .label.active{{color:var(--accent)}}
 
   /* Steps */
   .step{{display:none}}
@@ -3154,71 +3270,71 @@ _DEMO_HTML = f"""<!DOCTYPE html>
                 margin-bottom:2rem}}
 
   /* Big metric */
-  .big-metric{{font-family:monospace;font-size:3.5rem;color:#00ff99;
+  .big-metric{{font-family:monospace;font-size:3.5rem;color:var(--accent);
                font-weight:bold;line-height:1;margin:1rem 0}}
-  .big-label{{color:#555;font-size:0.85rem;margin-bottom:2rem}}
+  .big-label{{color:var(--text-3);font-size:0.85rem;margin-bottom:2rem}}
 
   /* Methodology expander */
   details{{margin:1rem 0;border-left:2px solid #222;padding-left:1rem}}
-  summary{{color:#444;font-size:0.8rem;cursor:pointer;list-style:none;
+  summary{{color:var(--text-4);font-size:0.8rem;cursor:pointer;list-style:none;
            padding:0.4rem 0;user-select:none}}
   summary::-webkit-details-marker{{display:none}}
   summary::before{{content:"▶  ";font-size:0.65rem}}
   details[open] summary::before{{content:"▼  "}}
-  details p{{color:#555;font-size:0.82rem;line-height:1.7;margin-top:0.5rem}}
+  details p{{color:var(--text-3);font-size:0.82rem;line-height:1.7;margin-top:0.5rem}}
   details p+p{{margin-top:0.5rem}}
 
   /* Action buttons */
   .btn-row{{display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:1.5rem}}
   .btn{{font-family:monospace;font-size:0.9rem;padding:0.65rem 1.5rem;
         cursor:pointer;border:none;transition:background 0.15s}}
-  .btn-primary{{background:#00ff99;color:#000}}
-  .btn-primary:hover{{background:#00dd88}}
-  .btn-secondary{{background:transparent;color:#00ff99;
+  .btn-primary{{background:var(--accent);color:#000}}
+  .btn-primary:hover{{background:var(--accent-hover)}}
+  .btn-secondary{{background:transparent;color:var(--accent);
                   border:1px solid #00ff9944}}
   .btn-secondary:hover{{background:#00ff9911}}
-  .btn:disabled{{background:#1a1a1a;color:#333;cursor:not-allowed;border:none}}
+  .btn:disabled{{background:#1a1a1a;color:var(--text-5);cursor:not-allowed;border:none}}
 
   /* Result card */
-  .result-card{{border:1px solid #1a1a1a;padding:1.5rem;margin-top:1.5rem}}
-  .result-card .headline{{font-size:1rem;color:#e0e0e0;line-height:1.6;
+  .result-card{{border:1px solid var(--border-2);padding:1.5rem;margin-top:1.5rem}}
+  .result-card .headline{{font-size:1rem;color:var(--text);line-height:1.6;
                            margin-bottom:1rem}}
   .kpi-row{{display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem}}
   .kpi{{flex:1;min-width:120px}}
-  .kpi .val{{font-family:monospace;font-size:1.4rem;color:#00ff99}}
-  .kpi .lbl{{font-size:0.72rem;color:#444;margin-top:0.2rem}}
-  .conf-badge{{display:inline-block;font-size:0.75rem;color:#555;
+  .kpi .val{{font-family:monospace;font-size:1.4rem;color:var(--accent)}}
+  .kpi .lbl{{font-size:0.72rem;color:var(--text-4);margin-top:0.2rem}}
+  .conf-badge{{display:inline-block;font-size:0.75rem;color:var(--text-3);
                margin-top:0.5rem}}
-  .response-preview{{background:#0d0d0d;border-left:2px solid #00ff9933;
+  .response-preview{{background:var(--panel-2);border-left:2px solid #00ff9933;
                      padding:0.75rem 1rem;margin-top:1rem;font-size:0.8rem;
-                     color:#888;line-height:1.7;max-height:300px;
+                     color:var(--text-3);line-height:1.7;max-height:300px;
                      overflow-y:auto;white-space:pre-wrap;font-family:monospace}}
-  .scope-note{{color:#2a2a2a;font-size:0.72rem;margin-top:1rem;font-family:monospace}}
-  .prev-note{{color:#333;font-size:0.75rem;font-family:monospace;
+  .scope-note{{color:var(--text-5);font-size:0.72rem;margin-top:1rem;font-family:monospace}}
+  .prev-note{{color:var(--text-5);font-size:0.75rem;font-family:monospace;
               margin-top:0.5rem}}
-  .divider{{border:none;border-top:1px solid #111;margin:1.5rem 0}}
+  .divider{{border:none;border-top:1px solid var(--panel);margin:1.5rem 0}}
 
   /* Three-band layout */
-  .band{{margin-bottom:1.75rem;padding-bottom:1.75rem;border-bottom:1px solid #0d0d0d}}
-  .band-label{{color:#333;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;
+  .band{{margin-bottom:1.75rem;padding-bottom:1.75rem;border-bottom:1px solid var(--panel-2)}}
+  .band-label{{color:var(--text-5);font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;
                font-family:monospace;margin-bottom:0.6rem}}
-  .limitation{{color:#2a2a2a;font-size:0.75rem;margin-top:1rem;line-height:1.6;
-               font-family:monospace;border-left:1px solid #1a1a1a;padding-left:0.75rem}}
+  .limitation{{color:var(--text-5);font-size:0.75rem;margin-top:1rem;line-height:1.6;
+               font-family:monospace;border-left:1px solid var(--border-2);padding-left:0.75rem}}
 
   /* Progress */
-  .progress-note{{color:#ffaa00;font-family:monospace;font-size:0.85rem;
+  .progress-note{{color:var(--warn);font-family:monospace;font-size:0.85rem;
                   margin-top:1rem}}
-  .stream-box{{background:#0d0d0d;border-left:2px solid #00ff9922;
+  .stream-box{{background:var(--panel-2);border-left:2px solid #00ff9922;
                padding:0.75rem 1rem;margin-top:0.75rem;font-size:0.78rem;
-               color:#666;line-height:1.7;max-height:160px;overflow-y:auto;
+               color:var(--text-4);line-height:1.7;max-height:160px;overflow-y:auto;
                white-space:pre-wrap;font-family:monospace;min-height:2.5rem}}
 
   /* Summary table */
   .summary-table{{width:100%;border-collapse:collapse;font-family:monospace;
                   font-size:0.82rem;margin-top:1rem}}
-  .summary-table td{{padding:0.5rem 0.75rem;border-bottom:1px solid #111}}
-  .summary-table td:first-child{{color:#555;width:40%}}
-  .summary-table td:last-child{{color:#00ff99}}
+  .summary-table td{{padding:0.5rem 0.75rem;border-bottom:1px solid var(--panel)}}
+  .summary-table td:first-child{{color:var(--text-3);width:40%}}
+  .summary-table td:last-child{{color:var(--accent)}}
 </style>
 </head>
 <body>
@@ -3233,17 +3349,17 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     <span class="dot" id="dot-5"></span>
     <span class="dot" id="dot-6"></span>
     <span class="label active" id="nav-label">Welcome</span>
-    <span id="step-counter" style="color:#333;font-size:0.7rem;margin-left:0.25rem">1 / 7</span>
+    <span id="step-counter" style="color:var(--text-5);font-size:0.7rem;margin-left:0.25rem">1 / 7</span>
   </div>
 </div>
 
 <!-- Step 0: Welcome -->
 <div class="step active" id="step-0">
   <h1>WattLab</h1>
-  <p style="color:#555;font-size:0.85rem;margin-bottom:1.5rem">
+  <p style="color:var(--text-3);font-size:0.85rem;margin-bottom:1.5rem">
     Greening of Streaming · Live energy measurement · GoS1</p>
 
-  <p style="color:#aaa;line-height:1.8;max-width:560px">
+  <p style="color:var(--text-2);line-height:1.8;max-width:560px">
     WattLab measures the real energy cost of video transcoding and AI inference —
     using a calibrated smart plug, not estimates. Every number on this page
     comes from a live measurement on GoS1, a server in our lab in France.
@@ -3282,7 +3398,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="band">
     <div class="band-label">What this shows</div>
-    <p style="color:#aaa;line-height:1.8;max-width:560px">
+    <p style="color:var(--text-2);line-height:1.8;max-width:560px">
       Whether transcoding to the same quality target uses more energy on CPU or GPU —
       and whether the faster path is also the more efficient one.
     </p>
@@ -3290,7 +3406,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="band">
     <div class="band-label">What we're doing</div>
-    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
+    <p style="color:var(--text-3);line-height:1.7;max-width:560px;margin-bottom:0.75rem">
       Encoding a 4K clip (Meridian, Netflix Open Content, CC BY 4.0) to 1080p H.264 —
       once in software (libx264, CPU only) and once as a full GPU pipeline
       (hardware decode + encode via h264_vaapi). Same source. Same quality target.
@@ -3319,7 +3435,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     A faster encode does not automatically mean less energy — this measures total Wh, not rate.</p>
   </div>
 
-  <div id="next-1" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
+  <div id="next-1" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid var(--panel)">
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="goStep(0)">← Welcome</button>
       <button class="btn btn-primary" onclick="goStep(2)">Next: LLM inference →</button>
@@ -3334,7 +3450,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="band">
     <div class="band-label">What this shows</div>
-    <p style="color:#aaa;line-height:1.8;max-width:560px">
+    <p style="color:var(--text-2);line-height:1.8;max-width:560px">
       How much energy each generated token costs — and how model size
       translates into energy use per unit of output.
     </p>
@@ -3342,7 +3458,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="band">
     <div class="band-label">What we're doing</div>
-    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
+    <p style="color:var(--text-3);line-height:1.7;max-width:560px;margin-bottom:0.75rem">
       Running a fixed prompt (T3 Long — network energy attribution briefing)
       through Mistral 7B cold: model unloaded before baseline so we capture
       the true first-request cost. GPU inference via Ollama ROCm.
@@ -3374,7 +3490,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     mWh/token measures inference energy only — not the energy cost of training the model.</p>
   </div>
 
-  <div id="next-2" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
+  <div id="next-2" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid var(--panel)">
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="goStep(1)">← Video</button>
       <button class="btn btn-primary" onclick="goStep(3)">Next: Image generation →</button>
@@ -3389,7 +3505,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="band">
     <div class="band-label">What this shows</div>
-    <p style="color:#aaa;line-height:1.8;max-width:560px">
+    <p style="color:var(--text-2);line-height:1.8;max-width:560px">
       How much energy one AI-generated image costs — measured end to end on
       real hardware, not estimated from TDP or cloud benchmarks.
     </p>
@@ -3397,7 +3513,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="band">
     <div class="band-label">What we're doing</div>
-    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
+    <p style="color:var(--text-3);line-height:1.7;max-width:560px;margin-bottom:0.75rem">
       Running SD-Turbo (stabilityai/sd-turbo, CPU, 8 steps, 512×512) with a
       randomly modified prompt — the colour modifier changes each run to prove
       the image is generated live, not replayed from cache.
@@ -3420,7 +3536,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     This measures one image on one machine — not the energy cost of a hosted API call.</p>
   </div>
 
-  <div id="next-3" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
+  <div id="next-3" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid var(--panel)">
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="goStep(2)">← LLM</button>
       <button class="btn btn-primary" onclick="goStep(4)">Next: RAG →</button>
@@ -3435,7 +3551,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="band">
     <div class="band-label">What this shows</div>
-    <p style="color:#aaa;line-height:1.8;max-width:560px">
+    <p style="color:var(--text-2);line-height:1.8;max-width:560px">
       Whether retrieval-augmented generation (RAG) — searching a local corpus
       before answering — costs meaningfully more energy than plain inference,
       and see the difference in context size the model must process.
@@ -3444,7 +3560,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="band">
     <div class="band-label">What we're doing</div>
-    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
+    <p style="color:var(--text-3);line-height:1.7;max-width:560px;margin-bottom:0.75rem">
       Running three modes back-to-back on Mistral 7B: baseline (no retrieval),
       RAG (small corpus), and RAG Large (with re-ranking).
       Same question, same model, same hardware — only the retrieval pipeline changes.
@@ -3467,7 +3583,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
     RAG retrieval adds overhead but the dominant cost remains token generation.</p>
   </div>
 
-  <div id="next-4" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid #111">
+  <div id="next-4" style="display:none;margin-top:2rem;padding-top:1.5rem;border-top:1px solid var(--panel)">
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="goStep(3)">← Image</button>
       <button class="btn btn-primary" onclick="goStep(5)">Next: How we flag confidence →</button>
@@ -3482,7 +3598,7 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="band">
     <div class="band-label">The problem</div>
-    <p style="color:#aaa;line-height:1.8;max-width:560px">
+    <p style="color:var(--text-2);line-height:1.8;max-width:560px">
       Not every measurement we take is equally trustworthy.
       System noise — P110 quantisation, OS jitter, Wi-Fi polling variance — is real.
       A task that adds a small delta above baseline might be signal or artefact.
@@ -3492,26 +3608,26 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="band">
     <div class="band-label">The system</div>
-    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:1rem">
+    <p style="color:var(--text-3);line-height:1.7;max-width:560px;margin-bottom:1rem">
       Every result carries a traffic light. Thresholds are <em>variance-relative</em>:
       anchored to empirically measured system noise, not fixed watt values.
-      <code style="font-family:monospace;font-size:0.82rem;color:#888">noise = (variance% / 100) × W_base</code>
+      <code style="font-family:monospace;font-size:0.82rem;color:var(--text-3)">noise = (variance% / 100) × W_base</code>
     </p>
     <div style="display:flex;flex-direction:column;gap:0.75rem;max-width:480px">
       <div style="border-left:2px solid #1a3a1a;padding:0.6rem 1rem">
         <div style="font-family:monospace;font-size:0.9rem">🟢 Repeatable</div>
-        <div style="color:#555;font-size:0.82rem;margin-top:0.25rem">
+        <div style="color:var(--text-3);font-size:0.82rem;margin-top:0.25rem">
           ΔW &gt; 5× noise <em>and</em> ≥ 10 polls. Well above noise floor. Reliable enough to cite.</div>
       </div>
       <div style="border-left:2px solid #3a3a00;padding:0.6rem 1rem">
         <div style="font-family:monospace;font-size:0.9rem">🟡 Early insight</div>
-        <div style="color:#555;font-size:0.82rem;margin-top:0.25rem">
+        <div style="color:var(--text-3);font-size:0.82rem;margin-top:0.25rem">
           ΔW ≥ 2× noise <em>or</em> ≥ 5 polls. Directional signal, but needs more runs
           before we'd stake a public claim on it.</div>
       </div>
       <div style="border-left:2px solid #2a0000;padding:0.6rem 1rem">
         <div style="font-family:monospace;font-size:0.9rem">🔴 Need more data</div>
-        <div style="color:#555;font-size:0.82rem;margin-top:0.25rem">
+        <div style="color:var(--text-3);font-size:0.82rem;margin-top:0.25rem">
           Below yellow threshold. Could be measurement artefact.
           We publish it anyway — but we won't cite it yet.</div>
       </div>
@@ -3520,14 +3636,14 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 
   <div class="band">
     <div class="band-label">Why variance-relative?</div>
-    <p style="color:#555;line-height:1.7;max-width:560px;margin-bottom:0.75rem">
+    <p style="color:var(--text-3);line-height:1.7;max-width:560px;margin-bottom:0.75rem">
       Fixed thresholds (e.g. "5W = green") don't adapt to the machine's actual noise
       level. Our calibration run measures idle variance, CPU encode variance, and GPU
       encode variance separately — then sets the noise floor from real data.
       At 55W idle with 2% variance: noise ≈ 1.1W, green threshold ≈ 5.5W.
       As the system is calibrated further, these thresholds tighten automatically.
     </p>
-    <p style="color:#555;line-height:1.7;max-width:560px">
+    <p style="color:var(--text-3);line-height:1.7;max-width:560px">
       On any result page, click a 🟢 🟡 🔴 badge for a quick reminder of the formula.
     </p>
   </div>
@@ -3541,11 +3657,11 @@ _DEMO_HTML = f"""<!DOCTYPE html>
 <!-- Step 6: Findings -->
 <div class="step" id="step-6">
   <h1>Findings</h1>
-  <p style="color:#555;font-size:0.85rem;margin-bottom:1.5rem">
+  <p style="color:var(--text-3);font-size:0.85rem;margin-bottom:1.5rem">
     Greening of Streaming · WattLab · GoS1</p>
 
   <div id="summary-content">
-    <p style="color:#555;font-size:0.85rem">Loading results…</p>
+    <p style="color:var(--text-3);font-size:0.85rem">Loading results…</p>
   </div>
 
   <hr class="divider">
@@ -3603,19 +3719,19 @@ function revealNext(n) {{
 }}
 
 function loadVideoStep() {{
-  document.getElementById('video-status').innerHTML = '<p class="progress-note" style="color:#555">Loading last result…</p>';
+  document.getElementById('video-status').innerHTML = '<p class="progress-note" style="color:var(--text-3)">Loading last result…</p>';
   showPrevVideo();
 }}
 function loadLLMStep() {{
-  document.getElementById('llm-status').innerHTML = '<p class="progress-note" style="color:#555">Loading last result…</p>';
+  document.getElementById('llm-status').innerHTML = '<p class="progress-note" style="color:var(--text-3)">Loading last result…</p>';
   showPrevLLM();
 }}
 function loadImageStep() {{
-  document.getElementById('image-status').innerHTML = '<p class="progress-note" style="color:#555">Loading last result…</p>';
+  document.getElementById('image-status').innerHTML = '<p class="progress-note" style="color:var(--text-3)">Loading last result…</p>';
   showPrevImage();
 }}
 function loadRAGStep() {{
-  document.getElementById('rag-status').innerHTML = '<p class="progress-note" style="color:#555">Loading last result…</p>';
+  document.getElementById('rag-status').innerHTML = '<p class="progress-note" style="color:var(--text-3)">Loading last result…</p>';
   showPrevRAG();
 }}
 
@@ -3662,7 +3778,7 @@ async function showPrevVideo() {{
   }} catch(e) {{
     document.getElementById('video-btns').style.display = 'flex';
     document.getElementById('video-status').innerHTML =
-      '<p class="progress-note" style="color:#ff4400">Error: ' + e + '</p>';
+      '<p class="progress-note" style="color:var(--err)">Error: ' + e + '</p>';
   }}
 }}
 
@@ -3688,7 +3804,7 @@ async function showPrevLLM() {{
   }} catch(e) {{
     document.getElementById('llm-btns').style.display = 'flex';
     document.getElementById('llm-status').innerHTML =
-      '<p class="progress-note" style="color:#ff4400">Error: ' + e + '</p>';
+      '<p class="progress-note" style="color:var(--err)">Error: ' + e + '</p>';
   }}
 }}
 
@@ -3715,7 +3831,7 @@ async function runDemoVideo() {{
 function showVideoError(msg) {{
   document.getElementById('video-btns').style.display = 'flex';
   document.getElementById('video-status').innerHTML =
-    '<p class="progress-note" style="color:#ff4400">Error: ' + msg + '</p>';
+    '<p class="progress-note" style="color:var(--err)">Error: ' + msg + '</p>';
 }}
 
 const VIDEO_STAGE_LABELS = {{
@@ -3773,7 +3889,7 @@ async function runDemoLLM() {{
 function showLLMError(msg) {{
   document.getElementById('llm-btns').style.display = 'flex';
   document.getElementById('llm-status').innerHTML =
-    '<p class="progress-note" style="color:#ff4400">Error: ' + msg + '</p>';
+    '<p class="progress-note" style="color:var(--err)">Error: ' + msg + '</p>';
 }}
 
 function pollLLM(jobId, t0) {{
@@ -3861,14 +3977,14 @@ function renderLLMResult(r, savedAt, isPrev) {{
       <p class="headline">${{a.finding || ''}}</p>
       <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem">
         <div style="flex:1;min-width:180px">
-          <div style="color:#444;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem">CPU</div>
+          <div style="color:var(--text-4);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem">CPU</div>
           <div class="kpi-row">
             <div class="kpi"><div class="val">${{fmt(ce && ce.mwh_per_token,4)}}</div><div class="lbl">mWh/token</div></div>
             <div class="kpi"><div class="val">${{fmt(ci && ci.tokens_per_sec,1)}}</div><div class="lbl">tok/s</div></div>
           </div>
         </div>
         <div style="flex:1;min-width:180px">
-          <div style="color:#444;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem">GPU</div>
+          <div style="color:var(--text-4);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem">GPU</div>
           <div class="kpi-row">
             <div class="kpi"><div class="val">${{fmt(ge && ge.mwh_per_token,4)}}</div><div class="lbl">mWh/token</div></div>
             <div class="kpi"><div class="val">${{fmt(gi && gi.tokens_per_sec,1)}}</div><div class="lbl">tok/s</div></div>
@@ -3894,7 +4010,7 @@ function renderLLMResult(r, savedAt, isPrev) {{
     }}
     if (!e) {{
       document.getElementById('llm-btns').style.display = 'flex';
-      document.getElementById('llm-status').innerHTML = '<p class="progress-note" style="color:#555">Result format not recognised — run a new measurement.</p>';
+      document.getElementById('llm-status').innerHTML = '<p class="progress-note" style="color:var(--text-3)">Result format not recognised — run a new measurement.</p>';
       return;
     }}
     const modeNote = r.warm ? '🌡 Warm' : '❄ Cold';
@@ -3973,10 +4089,10 @@ async function runDemoRAG() {{
     const data = await resp.json();
     if (data.job_id) pollDemoRAG(data.job_id, Date.now());
     else document.getElementById('rag-status').innerHTML =
-      '<p class="progress-note" style="color:#ff4400">' + JSON.stringify(data) + '</p>';
+      '<p class="progress-note" style="color:var(--err)">' + JSON.stringify(data) + '</p>';
   }} catch(e) {{
     document.getElementById('rag-status').innerHTML =
-      '<p class="progress-note" style="color:#ff4400">Error: ' + e + '</p>';
+      '<p class="progress-note" style="color:var(--err)">Error: ' + e + '</p>';
     document.getElementById('rag-btns').style.display = 'flex';
   }}
 }}
@@ -3991,7 +4107,7 @@ function pollDemoRAG(jobId, t0) {{
       renderRAGResult(data.result, new Date().toISOString(), false);
     }} else if (data.error) {{
       document.getElementById('rag-status').innerHTML =
-        '<p class="progress-note" style="color:#ff4400">Error: ' + data.error + '</p>';
+        '<p class="progress-note" style="color:var(--err)">Error: ' + data.error + '</p>';
       document.getElementById('rag-btns').style.display = 'flex';
     }} else {{
       const stage = data.stage || '';
@@ -4011,7 +4127,7 @@ function renderRAGResult(r, savedAt, isPrev) {{
   const labels = {{'baseline': 'No retrieval', 'rag': 'RAG', 'rag_large': 'RAG Large'}};
   const results = r.results || {{}};
   const modelLine = r.model_label
-    ? `<div style="font-family:monospace;font-size:0.78rem;color:#555;margin-bottom:1rem">
+    ? `<div style="font-family:monospace;font-size:0.78rem;color:var(--text-3);margin-bottom:1rem">
          Model: ${{r.model_label}}${{r.model_params ? ' · ' + r.model_params : ''}}</div>`
     : '';
   let cols = '';
@@ -4023,12 +4139,12 @@ function renderRAGResult(r, savedAt, isPrev) {{
     const outTok = inf.output_tokens != null ? inf.output_tokens : '—';
     const retMs = res.retrieval_ms > 0 ? fmt(res.retrieval_ms, 0) + ' ms retrieval' : 'no retrieval';
     cols += `<div style="flex:1;min-width:130px;border-left:2px solid #1a1a1a;padding-left:0.75rem">
-      <div style="font-family:monospace;font-size:0.78rem;color:#555;margin-bottom:0.5rem">${{labels[m]}}</div>
+      <div style="font-family:monospace;font-size:0.78rem;color:var(--text-3);margin-bottom:0.5rem">${{labels[m]}}</div>
       <div class="kpi" style="margin-bottom:0.4rem">
         <div class="val">${{fmt(e.mwh_per_token, 3)}}</div>
         <div class="lbl">mWh / token</div>
       </div>
-      <div style="font-size:0.75rem;color:#444;line-height:1.8">
+      <div style="font-size:0.75rem;color:var(--text-4);line-height:1.8">
         ${{fmt(inf.tokens_per_sec, 1)}} tok/s<br>
         ${{inTok}} in · ${{outTok}} out tokens<br>
         ${{retMs}}<br>
@@ -4064,7 +4180,7 @@ async function runDemoImage() {{
   if (data.error) {{
     document.getElementById('image-btns').style.display = 'flex';
     document.getElementById('image-status').innerHTML =
-      '<p class="progress-note" style="color:#ff4400">' + data.error + '</p>';
+      '<p class="progress-note" style="color:var(--err)">' + data.error + '</p>';
     return;
   }}
   pollDemoImage(data.job_id);
@@ -4088,7 +4204,7 @@ async function pollDemoImage(jobId) {{
     }}
     if (j.error) {{
       document.getElementById('image-status').innerHTML =
-        '<p class="progress-note" style="color:#ff4400">Error: ' + j.error + '</p>';
+        '<p class="progress-note" style="color:var(--err)">Error: ' + j.error + '</p>';
       document.getElementById('image-btns').style.display = 'flex';
       return;
     }}
@@ -4120,7 +4236,7 @@ async function showPrevImage() {{
   }} catch(e) {{
     document.getElementById('image-btns').style.display = 'flex';
     document.getElementById('image-status').innerHTML =
-      '<p class="progress-note" style="color:#ff4400">Error: ' + e + '</p>';
+      '<p class="progress-note" style="color:var(--err)">Error: ' + e + '</p>';
   }}
 }}
 
@@ -4133,10 +4249,10 @@ function renderDemoImageResult(r) {{
     const cpuWh = ce && (ce.wh_per_image || ce.delta_e_wh);
     const gpuWh = ge && (ge.wh_per_image || ge.delta_e_wh);
     let imgs = '';
-    if (cg && cg.b64_png) imgs += '<div style="flex:1;min-width:150px"><div style="color:#444;font-size:0.7rem;margin-bottom:0.4rem">CPU</div>' +
-      '<img src="data:image/png;base64,' + cg.b64_png + '" style="max-width:100%;border:1px solid #222;display:block"></div>';
-    if (gg && gg.b64_png) imgs += '<div style="flex:1;min-width:150px"><div style="color:#444;font-size:0.7rem;margin-bottom:0.4rem">GPU</div>' +
-      '<img src="data:image/png;base64,' + gg.b64_png + '" style="max-width:100%;border:1px solid #222;display:block"></div>';
+    if (cg && cg.b64_png) imgs += '<div style="flex:1;min-width:150px"><div style="color:var(--text-4);font-size:0.7rem;margin-bottom:0.4rem">CPU</div>' +
+      '<img src="data:image/png;base64,' + cg.b64_png + '" style="max-width:100%;border:1px solid var(--border);display:block"></div>';
+    if (gg && gg.b64_png) imgs += '<div style="flex:1;min-width:150px"><div style="color:var(--text-4);font-size:0.7rem;margin-bottom:0.4rem">GPU</div>' +
+      '<img src="data:image/png;base64,' + gg.b64_png + '" style="max-width:100%;border:1px solid var(--border);display:block"></div>';
     html = '<div class="result-card">' +
       '<p class="headline">' + (a.finding || '') + '</p>' +
       '<div class="kpi-row">' +
@@ -4152,14 +4268,14 @@ function renderDemoImageResult(r) {{
     const gen = r.generation;
     if (!e) {{
       document.getElementById('image-btns').style.display = 'flex';
-      document.getElementById('image-status').innerHTML = '<p class="progress-note" style="color:#555">Result format not recognised — run a new measurement.</p>';
+      document.getElementById('image-status').innerHTML = '<p class="progress-note" style="color:var(--text-3)">Result format not recognised — run a new measurement.</p>';
       return;
     }}
     const wh = e.wh_per_image || e.delta_e_wh;
     const imgHtml = gen && gen.b64_png
       ? '<img src="data:image/png;base64,' + gen.b64_png +
-        '" style="max-width:100%;border:1px solid #222;display:block;margin-top:1rem">' +
-        '<div style="color:#444;font-size:0.75rem;margin-top:0.5rem;font-style:italic">"' +
+        '" style="max-width:100%;border:1px solid var(--border);display:block;margin-top:1rem">' +
+        '<div style="color:var(--text-4);font-size:0.75rem;margin-top:0.5rem;font-style:italic">"' +
         (r.full_prompt || '') + '"</div>'
       : '';
     html = '<div class="result-card">' +
@@ -4179,25 +4295,25 @@ function renderDemoImageResult(r) {{
 // ─── Summary ─────────────────────────────────────────────────────────────────
 function buildSummary() {{
   const el = document.getElementById('summary-content');
-  let rows = '';
+  let videoRows = '', llmRows = '', imageRows = '', ragRows = '';
   try {{
 
-  // Video
+  // Video — the headline. GoS raison d'être.
   try {{
     if (videoResult && videoResult.mode === 'both') {{
       const a = videoResult.analysis || {{}};
       const ce = videoResult.cpu && videoResult.cpu.energy;
       const ge = videoResult.gpu && videoResult.gpu.energy;
-      rows += `<tr><td>Video · CPU energy</td><td>${{fmt(ce && ce.delta_e_wh,4)}} Wh ${{a.energy_winner==='CPU'?'✓':''}}</td></tr>`;
-      rows += `<tr><td>Video · GPU energy</td><td>${{fmt(ge && ge.delta_e_wh,4)}} Wh ${{a.energy_winner==='GPU'?'✓':''}}</td></tr>`;
-      rows += `<tr><td>Video · Finding</td><td style="color:#aaa;font-size:0.78rem">${{a.finding || a.energy_winner + ' used less energy'}}</td></tr>`;
+      videoRows += `<tr><td>CPU energy</td><td>${{fmt(ce && ce.delta_e_wh,4)}} Wh ${{a.energy_winner==='CPU'?'✓':''}}</td></tr>`;
+      videoRows += `<tr><td>GPU energy</td><td>${{fmt(ge && ge.delta_e_wh,4)}} Wh ${{a.energy_winner==='GPU'?'✓':''}}</td></tr>`;
+      videoRows += `<tr><td>Finding</td><td style="color:var(--text-2);font-size:0.78rem">${{a.finding || a.energy_winner + ' used less energy'}}</td></tr>`;
     }} else if (videoResult) {{
       const e = videoResult.energy || (videoResult.result && videoResult.result.energy);
-      rows += `<tr><td>Video · Energy</td><td>${{fmt(e && e.delta_e_wh,4)}} Wh</td></tr>`;
+      videoRows += `<tr><td>Energy</td><td>${{fmt(e && e.delta_e_wh,4)}} Wh</td></tr>`;
     }} else {{
-      rows += `<tr><td>Video</td><td style="color:#333">—</td></tr>`;
+      videoRows += `<tr><td>Video</td><td style="color:var(--text-5)">— not run yet</td></tr>`;
     }}
-  }} catch(err) {{ rows += `<tr><td>Video</td><td style="color:#555">error: ${{err.message}}</td></tr>`; }}
+  }} catch(err) {{ videoRows += `<tr><td>Video</td><td style="color:var(--text-3)">error: ${{err.message}}</td></tr>`; }}
 
   // LLM
   try {{
@@ -4205,9 +4321,9 @@ function buildSummary() {{
       const a = llmResult.analysis || {{}};
       const ce = llmResult.cpu && llmResult.cpu.energy;
       const ge = llmResult.gpu && llmResult.gpu.energy;
-      rows += `<tr><td>LLM · Model</td><td>${{llmResult.model_label || ''}}</td></tr>`;
-      rows += `<tr><td>LLM · CPU mWh/token</td><td>${{fmt(ce && ce.mwh_per_token,4)}} ${{a.mwh_winner==='CPU'?'✓':''}}</td></tr>`;
-      rows += `<tr><td>LLM · GPU mWh/token</td><td>${{fmt(ge && ge.mwh_per_token,4)}} ${{a.mwh_winner==='GPU'?'✓':''}}</td></tr>`;
+      llmRows += `<tr><td>Model</td><td>${{llmResult.model_label || ''}}</td></tr>`;
+      llmRows += `<tr><td>CPU mWh/token</td><td>${{fmt(ce && ce.mwh_per_token,4)}} ${{a.mwh_winner==='CPU'?'✓':''}}</td></tr>`;
+      llmRows += `<tr><td>GPU mWh/token</td><td>${{fmt(ge && ge.mwh_per_token,4)}} ${{a.mwh_winner==='GPU'?'✓':''}}</td></tr>`;
     }} else if (llmResult) {{
       let e = llmResult.energy;
       let inf = llmResult.inference;
@@ -4219,13 +4335,13 @@ function buildSummary() {{
         e = {{ mwh_per_token: llmResult.summary.mwh_per_token_mean }};
         inf = {{ tokens_per_sec: llmResult.summary.tokens_per_sec_mean }};
       }}
-      rows += `<tr><td>LLM · Model</td><td>${{llmResult.model_label || ''}}</td></tr>`;
-      rows += `<tr><td>LLM · Energy / token</td><td>${{fmt(e && e.mwh_per_token,4)}} mWh/token</td></tr>`;
-      rows += `<tr><td>LLM · Speed</td><td>${{fmt(inf && inf.tokens_per_sec,1)}} tok/s</td></tr>`;
+      llmRows += `<tr><td>Model</td><td>${{llmResult.model_label || ''}}</td></tr>`;
+      llmRows += `<tr><td>Energy / token</td><td>${{fmt(e && e.mwh_per_token,4)}} mWh/token</td></tr>`;
+      llmRows += `<tr><td>Speed</td><td>${{fmt(inf && inf.tokens_per_sec,1)}} tok/s</td></tr>`;
     }} else {{
-      rows += `<tr><td>LLM</td><td style="color:#333">—</td></tr>`;
+      llmRows += `<tr><td>LLM</td><td style="color:var(--text-5)">— not run yet</td></tr>`;
     }}
-  }} catch(err) {{ rows += `<tr><td>LLM</td><td style="color:#555">error: ${{err.message}}</td></tr>`; }}
+  }} catch(err) {{ llmRows += `<tr><td>LLM</td><td style="color:var(--text-3)">error: ${{err.message}}</td></tr>`; }}
 
   // Image
   try {{
@@ -4235,18 +4351,18 @@ function buildSummary() {{
       const ge = imageResult.gpu && imageResult.gpu.energy;
       const cg = imageResult.cpu && imageResult.cpu.generation;
       const gg = imageResult.gpu && imageResult.gpu.generation;
-      rows += `<tr><td>Image · CPU Wh/image</td><td>${{fmt(ce && (ce.wh_per_image||ce.delta_e_wh),4)}} Wh ${{a.energy_winner==='cpu'?'✓':''}}</td></tr>`;
-      rows += `<tr><td>Image · GPU Wh/image</td><td>${{fmt(ge && (ge.wh_per_image||ge.delta_e_wh),4)}} Wh ${{a.energy_winner==='gpu'?'✓':''}}</td></tr>`;
-      rows += `<tr><td>Image · Time CPU/GPU</td><td>${{fmt(cg && cg.gen_s,1)}}s / ${{fmt(gg && (gg.gen_s_per_image||gg.gen_s),1)}}s</td></tr>`;
+      imageRows += `<tr><td>CPU Wh/image</td><td>${{fmt(ce && (ce.wh_per_image||ce.delta_e_wh),4)}} Wh ${{a.energy_winner==='cpu'?'✓':''}}</td></tr>`;
+      imageRows += `<tr><td>GPU Wh/image</td><td>${{fmt(ge && (ge.wh_per_image||ge.delta_e_wh),4)}} Wh ${{a.energy_winner==='gpu'?'✓':''}}</td></tr>`;
+      imageRows += `<tr><td>Time CPU/GPU</td><td>${{fmt(cg && cg.gen_s,1)}}s / ${{fmt(gg && (gg.gen_s_per_image||gg.gen_s),1)}}s</td></tr>`;
     }} else if (imageResult) {{
       const e = imageResult.energy;
       const gen = imageResult.generation;
-      rows += `<tr><td>Image · Wh / image</td><td>${{fmt(e && (e.wh_per_image||e.delta_e_wh),4)}} Wh</td></tr>`;
-      rows += `<tr><td>Image · Generation time</td><td>${{fmt(gen && gen.total_s,1)}}s</td></tr>`;
+      imageRows += `<tr><td>Wh / image</td><td>${{fmt(e && (e.wh_per_image||e.delta_e_wh),4)}} Wh</td></tr>`;
+      imageRows += `<tr><td>Generation time</td><td>${{fmt(gen && gen.total_s,1)}}s</td></tr>`;
     }} else {{
-      rows += `<tr><td>Image</td><td style="color:#333">—</td></tr>`;
+      imageRows += `<tr><td>Image</td><td style="color:var(--text-5)">— not run yet</td></tr>`;
     }}
-  }} catch(err) {{ rows += `<tr><td>Image</td><td style="color:#555">error: ${{err.message}}</td></tr>`; }}
+  }} catch(err) {{ imageRows += `<tr><td>Image</td><td style="color:var(--text-3)">error: ${{err.message}}</td></tr>`; }}
 
   // RAG
   try {{
@@ -4256,23 +4372,42 @@ function buildSummary() {{
         const overhead = bl.energy && rl.energy && bl.energy.mwh_per_token > 0
           ? (((rl.energy.mwh_per_token - bl.energy.mwh_per_token) / bl.energy.mwh_per_token) * 100).toFixed(1)
           : null;
-        rows += `<tr><td>RAG · Baseline mWh/tok</td><td>${{fmt(bl.energy && bl.energy.mwh_per_token,3)}}</td></tr>`;
-        rows += `<tr><td>RAG Large mWh/tok</td><td>${{fmt(rl.energy && rl.energy.mwh_per_token,3)}}</td></tr>`;
-        if (overhead !== null) rows += `<tr><td>RAG overhead</td><td>${{overhead}}%</td></tr>`;
+        ragRows += `<tr><td>Without RAG mWh/tok</td><td>${{fmt(bl.energy && bl.energy.mwh_per_token,3)}}</td></tr>`;
+        ragRows += `<tr><td>RAG Large mWh/tok</td><td>${{fmt(rl.energy && rl.energy.mwh_per_token,3)}}</td></tr>`;
+        if (overhead !== null) ragRows += `<tr><td>RAG overhead</td><td>${{overhead}}%</td></tr>`;
       }}
     }} else {{
-      rows += `<tr><td>RAG</td><td style="color:#333">—</td></tr>`;
+      ragRows += `<tr><td>RAG</td><td style="color:var(--text-5)">— not run yet</td></tr>`;
     }}
-  }} catch(err) {{ rows += `<tr><td>RAG</td><td style="color:#555">error: ${{err.message}}</td></tr>`; }}
+  }} catch(err) {{ ragRows += `<tr><td>RAG</td><td style="color:var(--text-3)">error: ${{err.message}}</td></tr>`; }}
 
   }} catch(outerErr) {{
-    el.innerHTML = '<p style="color:#ff4400;font-family:monospace;font-size:0.82rem">Summary error: ' + outerErr + '</p>';
+    el.innerHTML = '<p style="color:var(--err);font-family:monospace;font-size:0.82rem">Summary error: ' + outerErr + '</p>';
     return;
   }}
 
+  // Render: video as headline, AI workloads collapsed beneath.
+  const collapseStyle = 'margin-top:0.75rem;border:1px solid var(--border);padding:0.5rem 0.9rem';
+  const summaryStyle = 'cursor:pointer;color:var(--text-2);font-size:0.92rem;padding:0.25rem 0;list-style:none';
+  const section = (title, rows) =>
+    `<details style="${{collapseStyle}}">
+       <summary style="${{summaryStyle}}">▸ ${{title}}</summary>
+       <table class="summary-table" style="margin-top:0.5rem"><tbody>${{rows}}</tbody></table>
+     </details>`;
+
   el.innerHTML = `
-    <table class="summary-table"><tbody>${{rows}}</tbody></table>
-    <p style="color:#555;font-size:0.82rem;line-height:1.7;margin-top:1.5rem;max-width:560px">
+    <h2 style="color:var(--accent);font-size:1.05rem;margin-bottom:0.4rem">▶ Video transcoding</h2>
+    <p style="color:var(--text-3);font-size:0.78rem;margin-bottom:0.75rem">
+      The core GoS focus — streaming's largest controllable energy footprint.</p>
+    <table class="summary-table"><tbody>${{videoRows}}</tbody></table>
+
+    <p style="color:var(--text-3);font-size:0.78rem;margin-top:1.5rem;letter-spacing:0.04em">
+      OTHER WORKLOADS MEASURED</p>
+    ${{section('LLM inference', llmRows)}}
+    ${{section('Image generation', imageRows)}}
+    ${{section('RAG (retrieval-augmented inference)', ragRows)}}
+
+    <p style="color:var(--text-3);font-size:0.82rem;line-height:1.7;margin-top:1.5rem;max-width:560px">
       These figures are from live measurements on GoS1, a server in France,
       using a calibrated smart plug. Not modelled. Not averaged.
       Reproducible by anyone with the same hardware.
@@ -4287,7 +4422,7 @@ function buildSummary() {{
 @app.get("/image", response_class=HTMLResponse)
 async def image_page():
     queue_depth = len(pending_queue) + (1 if current_job_id else 0)
-    busy_banner = (f'<div style="background:#333;color:#ffaa00;padding:0.75rem 1rem;'
+    busy_banner = (f'<div style="background:var(--border-3);color:var(--warn);padding:0.75rem 1rem;'
                    f'margin-bottom:1rem;font-size:0.85rem">'
                    f'⏱ {queue_depth} job{"s" if queue_depth != 1 else ""} in queue — '
                    f'yours will be added and run automatically.</div>') \
@@ -4303,9 +4438,9 @@ async def image_page():
             mode = r.get("mode", "cpu")
             downloads = (
                 f'<a href="/results/image/{r["job_id"]}/download.json" download '
-                f'style="color:#333;font-size:0.72rem;text-decoration:none;margin-right:0.75rem">↓ JSON</a>'
+                f'style="color:var(--text-5);font-size:0.72rem;text-decoration:none;margin-right:0.75rem">↓ JSON</a>'
                 f'<a href="/results/image/{r["job_id"]}/download.csv" download '
-                f'style="color:#333;font-size:0.72rem;text-decoration:none">↓ CSV</a>'
+                f'style="color:var(--text-5);font-size:0.72rem;text-decoration:none">↓ CSV</a>'
             )
             if mode == "both":
                 def _side_html(label, s):
@@ -4314,8 +4449,8 @@ async def image_page():
                            if s.get("b64_png") else "")
                     conf = s.get("confidence", {})
                     return (f'<div style="display:flex;align-items:center;margin-top:0.4rem">'
-                            f'{img}<span style="color:#555;font-size:0.78rem">'
-                            f'<span style="color:#aaa">{label}</span> &nbsp;·&nbsp; '
+                            f'{img}<span style="color:var(--text-3);font-size:0.78rem">'
+                            f'<span style="color:var(--text-2)">{label}</span> &nbsp;·&nbsp; '
                             f'{conf.get("flag","")} {conf.get("label","")} &nbsp;·&nbsp; '
                             f'{s.get("delta_e_wh","?")} Wh &nbsp;·&nbsp; {s.get("delta_t_s","?")}s'
                             f'</span></div>')
@@ -4325,7 +4460,7 @@ async def image_page():
                   <span class="prev-meta">{date_str} &nbsp;·&nbsp; CPU vs GPU{model_tag}</span>
                   {_side_html("CPU", r.get("cpu", {}))}
                   {_side_html("GPU", r.get("gpu", {}))}
-                  <div class="prev-prompt" style="color:#555;font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
+                  <div class="prev-prompt" style="color:var(--text-3);font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
                   <div style="margin-top:0.3rem">{downloads}</div>
                 </div>"""
             elif mode == "compare_models":
@@ -4337,8 +4472,8 @@ async def image_page():
                     lbl = s.get("model_label", "?")
                     px = s.get("size_px", "?")
                     return (f'<div style="display:flex;align-items:center;margin-top:0.4rem">'
-                            f'{img}<span style="color:#555;font-size:0.78rem">'
-                            f'<span style="color:#aaa">{lbl} ({px}px)</span> &nbsp;·&nbsp; '
+                            f'{img}<span style="color:var(--text-3);font-size:0.78rem">'
+                            f'<span style="color:var(--text-2)">{lbl} ({px}px)</span> &nbsp;·&nbsp; '
                             f'{conf.get("flag","")} {conf.get("label","")} &nbsp;·&nbsp; '
                             f'{s.get("wh_per_image","?")} Wh/img &nbsp;·&nbsp; {s.get("delta_t_s","?")}s'
                             f'</span></div>')
@@ -4346,7 +4481,7 @@ async def image_page():
                   <span class="prev-meta">{date_str} &nbsp;·&nbsp; Compare models (GPU)</span>
                   {_mdl_html(r.get("small", {}))}
                   {_mdl_html(r.get("large", {}))}
-                  <div class="prev-prompt" style="color:#555;font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
+                  <div class="prev-prompt" style="color:var(--text-3);font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
                   <div style="margin-top:0.3rem">{downloads}</div>
                 </div>"""
             else:
@@ -4364,7 +4499,7 @@ async def image_page():
                       &nbsp;·&nbsp; {r.get("delta_e_wh","?")} Wh/image
                       &nbsp;·&nbsp; {r.get("delta_t_s","?")}s
                     </span>
-                    <div class="prev-prompt" style="color:#555;font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
+                    <div class="prev-prompt" style="color:var(--text-3);font-size:0.75rem;margin-top:0.3rem">{fp[:80]}</div>
                     <div style="margin-top:0.3rem">{downloads}</div>
                   </div>
                 </div>"""
@@ -4377,46 +4512,46 @@ async def image_page():
   <title>WattLab — Image Generation Test</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{ font-family: monospace; background: #0a0a0a; color: #e0e0e0;
+        body {{ font-family: monospace; background: var(--bg); color: var(--text);
                max-width: 780px; margin: 0 auto; padding: 2rem; }}
-        h1 {{ color: #00ff99; margin-bottom: 0.25rem; font-size: 1.6rem; }}
-        .subtitle {{ color: #555; font-size: 0.8rem; margin-bottom: 1.5rem; }}
-        .info {{ color: #777; font-size: 0.82rem; margin-bottom: 1.5rem;
+        h1 {{ color: var(--accent); margin-bottom: 0.25rem; font-size: 1.6rem; }}
+        .subtitle {{ color: var(--text-3); font-size: 0.8rem; margin-bottom: 1.5rem; }}
+        .info {{ color: var(--text-3); font-size: 0.82rem; margin-bottom: 1.5rem;
                  border-left: 2px solid #222; padding-left: 1rem; line-height: 1.6; }}
-        textarea {{ width: 100%; background: #111; color: #e0e0e0; border: 1px solid #333;
+        textarea {{ width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--border-3);
                     padding: 0.75rem; font-family: monospace; font-size: 0.9rem;
                     resize: vertical; margin-bottom: 1rem; }}
-        button {{ background: #00ff99; color: #000; border: none;
+        button {{ background: var(--accent); color: #000; border: none;
                   padding: 0.75rem 2rem; cursor: pointer;
                   font-family: monospace; font-size: 1rem; }}
-        button:disabled {{ background: #222; color: #555; cursor: not-allowed; }}
-        button:hover:not(:disabled) {{ background: #00dd88; }}
+        button:disabled {{ background: var(--border); color: var(--text-3); cursor: not-allowed; }}
+        button:hover:not(:disabled) {{ background: var(--accent-hover); }}
         #status {{ margin-top: 1.5rem; }}
-        .progress-box {{ border: 1px solid #222; padding: 1.5rem; }}
-        .progress-header {{ color: #ffaa00; font-size: 0.9rem; margin-bottom: 1.25rem; }}
+        .progress-box {{ border: 1px solid var(--border); padding: 1.5rem; }}
+        .progress-header {{ color: var(--warn); font-size: 0.9rem; margin-bottom: 1.25rem; }}
         .stages {{ display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.25rem; }}
         .stage {{ display: flex; align-items: center; gap: 0.75rem; font-size: 0.82rem; }}
         .stage-icon {{ width: 1.2rem; text-align: center; flex-shrink: 0; }}
-        .live-watts {{ font-size: 2rem; color: #00ff99; font-weight: bold; margin-top: 0.5rem; }}
+        .live-watts {{ font-size: 2rem; color: var(--accent); font-weight: bold; margin-top: 0.5rem; }}
         .result-box {{ border: 1px solid #00ff9944; padding: 1.5rem; margin-top: 1.5rem; }}
-        .result-box h2 {{ color: #00ff99; font-size: 1.1rem; margin-bottom: 1.25rem; }}
+        .result-box h2 {{ color: var(--accent); font-size: 1.1rem; margin-bottom: 1.25rem; }}
         .kpis {{ display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.25rem; }}
         .kpi {{ display: flex; flex-direction: column; gap: 0.25rem; }}
-        .kpi .val {{ font-size: 1.4rem; color: #00ff99; font-weight: bold; }}
-        .kpi .lbl {{ font-size: 0.72rem; color: #555; }}
-        .conf-badge {{ display: inline-block; border: 1px solid #333; padding: 0.25rem 0.75rem;
-                       font-size: 0.8rem; color: #aaa; margin-bottom: 1rem; }}
-        .scope-note {{ color: #333; font-size: 0.75rem; margin-top: 1rem; }}
-        .prev-runs {{ margin-top: 2rem; border-top: 1px solid #1a1a1a; padding-top: 1.5rem; }}
-        .prev-runs h3 {{ color: #444; font-size: 0.85rem; margin-bottom: 1rem; }}
-        .prev-item {{ padding: 0.75rem 0; border-bottom: 1px solid #111;
+        .kpi .val {{ font-size: 1.4rem; color: var(--accent); font-weight: bold; }}
+        .kpi .lbl {{ font-size: 0.72rem; color: var(--text-3); }}
+        .conf-badge {{ display: inline-block; border: 1px solid var(--border-3); padding: 0.25rem 0.75rem;
+                       font-size: 0.8rem; color: var(--text-2); margin-bottom: 1rem; }}
+        .scope-note {{ color: var(--text-5); font-size: 0.75rem; margin-top: 1rem; }}
+        .prev-runs {{ margin-top: 2rem; border-top: 1px solid var(--border-2); padding-top: 1.5rem; }}
+        .prev-runs h3 {{ color: var(--text-4); font-size: 0.85rem; margin-bottom: 1rem; }}
+        .prev-item {{ padding: 0.75rem 0; border-bottom: 1px solid var(--panel);
                       display: flex; align-items: flex-start; flex-wrap: wrap; }}
-        .prev-meta {{ color: #555; font-size: 0.78rem; }}
+        .prev-meta {{ color: var(--text-3); font-size: 0.78rem; }}
         .image-preview {{ margin-top: 1.25rem; }}
-        .image-preview img {{ max-width: 100%; border: 1px solid #222; display: block; }}
-        .image-caption {{ color: #444; font-size: 0.75rem; margin-top: 0.5rem; font-style: italic; }}
-        .back {{ color: #555; font-size: 0.8rem; margin-bottom: 1.5rem; display: block; }}
-        .back:hover {{ color: #00ff99; }}
+        .image-preview img {{ max-width: 100%; border: 1px solid var(--border); display: block; }}
+        .image-caption {{ color: var(--text-4); font-size: 0.75rem; margin-top: 0.5rem; font-style: italic; }}
+        .back {{ color: var(--text-3); font-size: 0.8rem; margin-bottom: 1.5rem; display: block; }}
+        .back:hover {{ color: var(--accent); }}
     </style>
 </head>
 <body>
@@ -4425,46 +4560,46 @@ async def image_page():
     <h1>Image Generation Test</h1>
     <div class="subtitle">SD-Turbo (~1B) · SDXL-Turbo (~3.5B) · 512×512 · ROCm fp16 on RX 7800 XT</div>
 
-    <div style="margin-bottom:1rem;font-size:0.78rem;color:#555">
-        First time here? <a href="/demo" style="color:#00ff99;text-decoration:none">Try the Guided Tour →</a>
+    <div style="margin-bottom:1rem;font-size:0.78rem;color:var(--text-3)">
+        First time here? <a href="/demo" style="color:var(--accent);text-decoration:none">Try the Guided Tour →</a>
     </div>
 
     <details style="margin-bottom:1.5rem;border-left:2px solid #222;padding-left:1rem">
-        <summary style="cursor:pointer;color:#888;font-size:0.82rem;list-style:none;outline:none">
-            ⓘ About this test <span style="color:#444;font-size:0.72rem">(click to expand)</span>
+        <summary style="cursor:pointer;color:var(--text-3);font-size:0.82rem;list-style:none;outline:none">
+            ⓘ About this test <span style="color:var(--text-4);font-size:0.72rem">(click to expand)</span>
         </summary>
-        <div style="color:#777;font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
+        <div style="color:var(--text-3);font-size:0.82rem;line-height:1.6;margin-top:0.75rem">
             Measures the wall-power cost of generating one AI image from text.<br>
-            <strong style="color:#aaa">SD-Turbo</strong>: CPU {IMAGE_STEPS_CPU} steps (~12s) or GPU batch of {GPU_BATCH_SIZE} × {IMAGE_STEPS_GPU} steps (~10s). Note: solo-mode GPU over-samples (native is 1–4 steps) to keep runtime above the P110 polling floor.<br>
-            <strong style="color:#aaa">SDXL-Turbo</strong>: GPU only, 4 steps (native), batch of 15 (~10s).<br>
-            <strong style="color:#aaa">Compare Models ⚡</strong>: both run at 4 steps (native for each), 512×512, same seed — SD-Turbo batch 30, SDXL-Turbo batch 15. Model size is the only variable.<br>
+            <strong style="color:var(--text-2)">SD-Turbo</strong>: CPU {IMAGE_STEPS_CPU} steps (~12s) or GPU batch of {GPU_BATCH_SIZE} × {IMAGE_STEPS_GPU} steps (~10s). Note: solo-mode GPU over-samples (native is 1–4 steps) to keep runtime above the P110 polling floor.<br>
+            <strong style="color:var(--text-2)">SDXL-Turbo</strong>: GPU only, 4 steps (native), batch of 15 (~10s).<br>
+            <strong style="color:var(--text-2)">Compare Models ⚡</strong>: both run at 4 steps (native for each), 512×512, same seed — SD-Turbo batch 30, SDXL-Turbo batch 15. Model size is the only variable.<br>
             Each run appends a random colour/mood modifier — live proof the image is generated, not replayed.
         </div>
     </details>
 
-    <label style="color:#888;font-size:0.8rem;display:block;margin-bottom:0.4rem">Model</label>
+    <label style="color:var(--text-3);font-size:0.8rem;display:block;margin-bottom:0.4rem">Model</label>
     <div id="model-row" style="display:flex;gap:0.75rem;margin-bottom:1.2rem">
       <div class="preset selected" id="mdl-sd-turbo" onclick="selectModelKey('sd-turbo')"
-           style="border:1px solid #00ff99;background:#00ff9911;padding:0.75rem 1rem;
+           style="border:1px solid var(--accent);background:#00ff9911;padding:0.75rem 1rem;
                   cursor:pointer;flex:1">
-        <div style="color:#00ff99;font-size:0.85rem;font-weight:bold">SD-Turbo</div>
-        <div style="color:#555;font-size:0.72rem">~1B params · 512×512 · CPU + GPU</div>
+        <div style="color:var(--accent);font-size:0.85rem;font-weight:bold">SD-Turbo</div>
+        <div style="color:var(--text-3);font-size:0.72rem">~1B params · 512×512 · CPU + GPU</div>
       </div>
       <div class="preset" id="mdl-sdxl-turbo" onclick="selectModelKey('sdxl-turbo')"
-           style="border:1px solid #333;padding:0.75rem 1rem;cursor:pointer;flex:1">
-        <div style="color:#aaa;font-size:0.85rem;font-weight:bold">SDXL-Turbo</div>
-        <div style="color:#555;font-size:0.72rem">~3.5B params · 512×512 · GPU only</div>
+           style="border:1px solid var(--border-3);padding:0.75rem 1rem;cursor:pointer;flex:1">
+        <div style="color:var(--text-2);font-size:0.85rem;font-weight:bold">SDXL-Turbo</div>
+        <div style="color:var(--text-3);font-size:0.72rem">~3.5B params · 512×512 · GPU only</div>
       </div>
     </div>
 
-    <label style="color:#888;font-size:0.8rem;display:block;margin-bottom:0.4rem">Prompt</label>
+    <label style="color:var(--text-3);font-size:0.8rem;display:block;margin-bottom:0.4rem">Prompt</label>
     <textarea id="prompt" rows="3">a lone wind turbine in an open landscape</textarea>
-    <div style="color:#555;font-size:0.75rem;margin-bottom:1.2rem">
+    <div style="color:var(--text-3);font-size:0.75rem;margin-bottom:1.2rem">
         A random colour/mood modifier is appended per run (e.g. "bathed in emerald light").
     </div>
 
     <div style="margin-bottom:1.25rem">
-      <span style="color:#888;font-size:0.8rem;margin-right:1rem">Backend:</span>
+      <span style="color:var(--text-3);font-size:0.8rem;margin-right:1rem">Backend:</span>
       <label style="font-size:0.85rem;margin-right:1.2rem;cursor:pointer" id="lbl-cpu">
         <input type="radio" name="img-device" value="cpu" checked onchange="selectedDevice=this.value"> CPU
       </label>
@@ -4479,7 +4614,7 @@ async def image_page():
     <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
       <button id="run-btn" onclick="startMeasurement()">Generate &amp; Measure</button>
       <button id="compare-btn" onclick="startCompareModels()"
-              style="background:#0a0a0a;border:1px solid #00ff99;color:#00ff99;
+              style="background:var(--bg);border:1px solid var(--accent);color:var(--accent);
                      padding:0.75rem 1.5rem;font-family:monospace;font-size:0.95rem;cursor:pointer">
         Compare Models (GPU) ⚡
       </button>
@@ -4632,7 +4767,7 @@ async function pollJob(jobId) {{
   if (j.error) {{
     clearInterval(pollTimer);
     document.getElementById('status').innerHTML =
-      '<p style="color:#ff4400">Error: ' + j.error + '</p>';
+      '<p style="color:var(--err)">Error: ' + j.error + '</p>';
     document.getElementById('run-btn').disabled = false;
     document.getElementById('compare-btn').disabled = false;
   }}
@@ -4656,7 +4791,7 @@ function _imageCard(label, pass_r, isWinner) {{
   const gen = pass_r.generation;
   const borderCol = isWinner ? '#00ff9966' : '#222';
   const imgHtml = gen.b64_png
-    ? `<div style="margin-top:0.75rem"><img src="data:image/png;base64,${{gen.b64_png}}" style="max-width:180px;border:1px solid #222"></div>`
+    ? `<div style="margin-top:0.75rem"><img src="data:image/png;base64,${{gen.b64_png}}" style="max-width:180px;border:1px solid var(--border)"></div>`
     : '';
   return `<div style="border:1px solid ${{borderCol}};padding:1rem;flex:1;min-width:220px">
     <div style="color:${{isWinner?'#00ff99':'#777'}};font-size:0.85rem;font-weight:bold;margin-bottom:0.75rem">${{label}}${{isWinner?' 🏆':''}}</div>
@@ -4666,7 +4801,7 @@ function _imageCard(label, pass_r, isWinner) {{
       <div class="kpi"><div class="val" style="font-size:1.1rem">${{fmt(e.delta_w,1)}} W</div><div class="lbl">delta W</div></div>
       <div class="kpi"><div class="val" style="font-size:1.1rem">${{e.poll_count}}</div><div class="lbl">polls</div></div>
     </div>
-    <div style="font-size:0.78rem;color:#555;margin-top:0.5rem">${{e.confidence.flag}} ${{e.confidence.label}} · ${{gen.batch_size}}×${{gen.steps}} steps</div>
+    <div style="font-size:0.78rem;color:var(--text-3);margin-top:0.5rem">${{e.confidence.flag}} ${{e.confidence.label}} · ${{gen.batch_size}}×${{gen.steps}} steps</div>
     ${{imgHtml}}
   </div>`;
 }}
@@ -4678,14 +4813,14 @@ function renderImageBoth(r) {{
   document.getElementById('status').innerHTML = `
     <div class="result-box">
       <h2>CPU vs GPU — Image Generation</h2>
-      <div style="background:#111;border:1px solid #333;padding:0.75rem 1rem;margin-bottom:1.25rem;font-size:0.85rem;color:#ccc">
+      <div style="background:var(--panel);border:1px solid var(--border-3);padding:0.75rem 1rem;margin-bottom:1.25rem;font-size:0.85rem;color:var(--text-2)">
         ${{a.finding}}
       </div>
       <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
         ${{_imageCard('CPU · Ryzen 9 7900', r.cpu, cpuWinsEnergy)}}
         ${{_imageCard('GPU · RX 7800 XT', r.gpu, gpuWinsEnergy)}}
       </div>
-      <div style="font-size:0.75rem;color:#444;margin-top:0.5rem">
+      <div style="font-size:0.75rem;color:var(--text-4);margin-top:0.5rem">
         Prompt: "${{r.full_prompt}}" · modifier: <em>${{r.modifier}}</em>
       </div>
       <p class="scope-note">${{r.scope}}</p>
@@ -4696,18 +4831,18 @@ function _modelCard(side_r) {{
   const e = side_r.energy;
   const gen = side_r.generation;
   const imgHtml = gen.b64_png
-    ? `<div style="margin-top:0.75rem"><img src="data:image/png;base64,${{gen.b64_png}}" style="max-width:100%;border:1px solid #222"></div>`
+    ? `<div style="margin-top:0.75rem"><img src="data:image/png;base64,${{gen.b64_png}}" style="max-width:100%;border:1px solid var(--border)"></div>`
     : '';
-  return `<div style="border:1px solid #222;padding:1rem;flex:1;min-width:260px">
-    <div style="color:#00ff99;font-size:0.9rem;font-weight:bold;margin-bottom:0.25rem">${{gen.model_label}}</div>
-    <div style="color:#555;font-size:0.72rem;margin-bottom:0.75rem">${{gen.model}} · ${{gen.size}}px · ${{gen.steps}} steps × batch ${{gen.batch_size}}</div>
+  return `<div style="border:1px solid var(--border);padding:1rem;flex:1;min-width:260px">
+    <div style="color:var(--accent);font-size:0.9rem;font-weight:bold;margin-bottom:0.25rem">${{gen.model_label}}</div>
+    <div style="color:var(--text-3);font-size:0.72rem;margin-bottom:0.75rem">${{gen.model}} · ${{gen.size}}px · ${{gen.steps}} steps × batch ${{gen.batch_size}}</div>
     <div class="kpis">
       <div class="kpi"><div class="val" style="font-size:1.2rem">${{fmt(e.wh_per_image,4)}} Wh</div><div class="lbl">per image</div></div>
       <div class="kpi"><div class="val" style="font-size:1.2rem">${{fmt(gen.gen_s_per_image,1)}} s</div><div class="lbl">gen/image</div></div>
       <div class="kpi"><div class="val" style="font-size:1.1rem">${{fmt(e.delta_w,1)}} W</div><div class="lbl">delta W</div></div>
       <div class="kpi"><div class="val" style="font-size:1.1rem">${{e.poll_count}}</div><div class="lbl">polls</div></div>
     </div>
-    <div style="font-size:0.78rem;color:#555;margin-top:0.5rem">${{e.confidence.flag}} ${{e.confidence.label}}</div>
+    <div style="font-size:0.78rem;color:var(--text-3);margin-top:0.5rem">${{e.confidence.flag}} ${{e.confidence.label}}</div>
     ${{imgHtml}}
   </div>`;
 }}
@@ -4717,17 +4852,17 @@ function renderCompareModels(r) {{
   document.getElementById('status').innerHTML = `
     <div class="result-box">
       <h2>SD-Turbo vs SDXL-Turbo — Same Prompt + Seed</h2>
-      <div style="background:#111;border:1px solid #333;padding:0.75rem 1rem;margin-bottom:1.25rem;font-size:0.85rem;color:#ccc">
+      <div style="background:var(--panel);border:1px solid var(--border-3);padding:0.75rem 1rem;margin-bottom:1.25rem;font-size:0.85rem;color:var(--text-2)">
         ${{a.finding}}
       </div>
       <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;align-items:stretch">
         ${{_modelCard(r.small)}}
         ${{_modelCard(r.large)}}
       </div>
-      <div style="font-size:0.75rem;color:#444;margin-top:0.5rem">
+      <div style="font-size:0.75rem;color:var(--text-4);margin-top:0.5rem">
         Prompt: "${{r.full_prompt}}" · modifier: <em>${{r.modifier}}</em> · seed: ${{r.seed}}
       </div>
-      <div style="font-size:0.75rem;color:#666;margin-top:0.75rem;font-style:italic">
+      <div style="font-size:0.75rem;color:var(--text-4);margin-top:0.75rem;font-style:italic">
         Quality is subjective. Judge the visual output above — is the larger model's image worth
         ${{a.energy_ratio_large_over_small}}× the energy for this prompt?
       </div>
@@ -4773,7 +4908,7 @@ function renderResult(r) {{
       </div>
       <div class="conf-badge">${{e.confidence.flag}} ${{e.confidence.label}}</div>
       ${{imgHtml}}
-      <div class="modifier-note" style="color:#444;font-size:0.75rem;margin-top:0.75rem">
+      <div class="modifier-note" style="color:var(--text-4);font-size:0.75rem;margin-top:0.75rem">
         Modifier applied this run: "<em>${{r.modifier}}</em>"
       </div>
       <p class="scope-note">${{r.scope}}</p>
@@ -4841,29 +4976,29 @@ async def queue_page():
     <meta http-equiv="refresh" content="4">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: monospace; background: #0a0a0a; color: #e0e0e0;
+        body { font-family: monospace; background: var(--bg); color: var(--text);
                max-width: 620px; margin: 0 auto; padding: 2rem; }
-        h1 { color: #00ff99; font-size: 1.3rem; margin-bottom: 0.25rem; }
-        .sub { color: #444; font-size: 0.78rem; margin-bottom: 2rem; }
-        .empty { color: #333; font-size: 0.85rem; padding: 1.5rem 0; }
-        .card { border: 1px solid #222; padding: 1rem 1.25rem; margin-bottom: 0.75rem; }
+        h1 { color: var(--accent); font-size: 1.3rem; margin-bottom: 0.25rem; }
+        .sub { color: var(--text-4); font-size: 0.78rem; margin-bottom: 2rem; }
+        .empty { color: var(--text-5); font-size: 0.85rem; padding: 1.5rem 0; }
+        .card { border: 1px solid var(--border); padding: 1rem 1.25rem; margin-bottom: 0.75rem; }
         .card.running { border-color: #00ff9966; }
-        .card.waiting { border-color: #333; }
+        .card.waiting { border-color: var(--text-5); }
         .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem;
                  margin-bottom: 0.5rem; }
-        .badge.run { background: #00ff9922; color: #00ff99; }
-        .badge.wait { background: #22222299; color: #555; }
-        .label { font-size: 0.9rem; color: #ccc; margin-bottom: 0.25rem; }
-        .stage { font-size: 0.75rem; color: #555; }
-        .back { color: #444; font-size: 0.78rem; text-decoration: none;
+        .badge.run { background: #00ff9922; color: var(--accent); }
+        .badge.wait { background: #22222299; color: var(--text-3); }
+        .label { font-size: 0.9rem; color: var(--text-2); margin-bottom: 0.25rem; }
+        .stage { font-size: 0.75rem; color: var(--text-3); }
+        .back { color: var(--text-4); font-size: 0.78rem; text-decoration: none;
                 display: block; margin-bottom: 1.5rem; }
-        .back:hover { color: #00ff99; }
-        .depth { font-size: 2.5rem; color: #00ff99; font-weight: bold; }
-        .depth-lbl { color: #444; font-size: 0.75rem; margin-bottom: 2rem; }
+        .back:hover { color: var(--accent); }
+        .depth { font-size: 2.5rem; color: var(--accent); font-weight: bold; }
+        .depth-lbl { color: var(--text-4); font-size: 0.75rem; margin-bottom: 2rem; }
     </style>
 </head>
 <body>
-    <a href="/" style="color:#555;text-decoration:none;font-size:0.82rem;display:block;margin-bottom:1.5rem">← Home</a>
+""" + _BACK + """
     <h1>Queue</h1>
     <div class="sub">Auto-refreshes every 4s</div>
     <div id="pause-banner"></div>
@@ -4871,7 +5006,7 @@ async def queue_page():
 <script>
 function resumeLink(type, jobId) {
     if (!type || !jobId || type === 'variance') return '';
-    return ' <a href="/' + type + '?job=' + jobId + '" style="color:#00ff99;font-size:0.75rem;' +
+    return ' <a href="/' + type + '?job=' + jobId + '" style="color:var(--accent);font-size:0.75rem;' +
            'text-decoration:none;margin-left:0.75rem">↩ Resume</a>';
 }
 async function load() {
@@ -4879,8 +5014,8 @@ async function load() {
     const q = await r.json();
     const banner = document.getElementById('pause-banner');
     banner.innerHTML = q.paused
-        ? '<div style="background:#442200;color:#ffaa00;padding:0.75rem 1rem;'
-        + 'margin-bottom:1rem;font-size:0.85rem;border:1px solid #ffaa00">'
+        ? '<div style="background:#442200;color:var(--warn);padding:0.75rem 1rem;'
+        + 'margin-bottom:1rem;font-size:0.85rem;border:1px solid var(--warn)">'
         + '⏸ Queue paused — new jobs will wait until <code>/tmp/owl-paused</code>'
         + ' is removed. Running job (if any) continues normally.'
         + '</div>'
@@ -5214,7 +5349,7 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
   /* ── Home link (top + bottom) — matches `_BACK` used on other pages ── */
   .home-link {
     display: inline-block;
-    color: #555;
+    color: var(--text-3);
     text-decoration: none;
     font-family: var(--mono);
     font-size: 13px;
@@ -5236,7 +5371,10 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
 
 <!-- Top bar -->
 <div class="topbar">
-  <a href="https://greeningofstreaming.org" target="_blank">
+  <a href="/" title="WattLab home" style="display:inline-flex;align-items:center;gap:0.5rem;text-decoration:none">
+    <img src="/static/owl.svg" alt="WattLab" style="height:32px;width:32px;border-radius:0;flex-shrink:0">
+  </a>
+  <a href="https://greeningofstreaming.org" target="_blank" title="Greening of Streaming">
     <img src="https://static.wixstatic.com/media/b1006e_f5e9aff607cf4133abf7089207dc3cab~mv2.png" alt="GoS">
   </a>
   <span class="title">WattLab · Methodology</span>
