@@ -3,6 +3,7 @@
 # Last updated: 2026-04-29 (Session 15)
 # See also: GOS1_INFRA.md — server infrastructure, Nextcloud backup, personal stack context
 # See also: TESTING.md — three-tier testing strategy (Tier 1 smoke / Tier 2 integration / Tier 3 manual)
+# See also: CHANGE_REQUESTS.md — pending design changes (CR-001 two-tier OWL, CR-001b demo lock)
 
 ## Project Identity
 - **Name:** WattLab
