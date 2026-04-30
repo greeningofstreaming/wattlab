@@ -18,6 +18,7 @@ from image_gen import (run_image_measurement, run_image_both_measurement,
                         IMAGE_STEPS_CPU, IMAGE_STEPS_GPU, GPU_BATCH_SIZE)
 import rag as rag_module
 import settings as cfg
+import carbon
 
 config = dotenv_values("/home/gos/wattlab/.env")
 app = FastAPI()
@@ -156,6 +157,7 @@ async def startup():
     asyncio.create_task(queue_worker())
     asyncio.create_task(power_poller())
     asyncio.create_task(sensors_poller())
+    asyncio.create_task(carbon.poller(zones=[carbon.HOME_ZONE]))
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, rag_module.check_index)
 
@@ -259,6 +261,281 @@ _LIVE_JS = (
     '})();</script>'
 )
 
+# Shared carbon UI helpers. Two globals defined: `wlCarbonRow(energy)` for
+# the inline CO2e line under any Energy (ΔE) row; `wlCarbonStrip(wh, label)`
+# for the per-report "if this had run elsewhere" comparison strip. Both
+# render explicit "live" / "estimated" badges so visitors know which data
+# source they're looking at — single source of truth for that distinction.
+# All carbon logic (fallback ladder, intensity table, polling) lives in
+# carbon.py; this is the UI projection only.
+_CARBON_JS = """
+<script>
+(function(){
+  var _zonesPromise = null;
+  function loadZones(){
+    if (_zonesPromise) return _zonesPromise;
+    _zonesPromise = fetch('/carbon').then(function(r){return r.json();})
+      .catch(function(){return null;});
+    return _zonesPromise;
+  }
+  // Warm the cache on every page that loads the footer.
+  loadZones();
+
+  function fmtG(v){
+    if (v == null) return '—';
+    if (v < 1)   return v.toFixed(3);
+    if (v < 100) return v.toFixed(2);
+    return v.toFixed(1);
+  }
+  // Auto-switch unit for mass — keeps ~2 significant figures readable across
+  // many orders of magnitude. A tiny transcode in France (~0.0004 g) shows
+  // as "0.40 mg" instead of "0.000 g". Returned string includes the unit.
+  // When grams === 0 we return em-dash: that means ΔE rounded to 0 Wh,
+  // i.e. below the P110 measurement floor (~1W × 1s poll). It is honest
+  // to surface "unmeasured" rather than imply a true zero footprint.
+  function fmtMass(g){
+    if (g == null) return '—';
+    if (g === 0)   return '—';
+    var ag = Math.abs(g);
+    if (ag >= 1)        return g.toFixed(2)   + ' g';
+    if (ag >= 0.001)    return (g*1000).toFixed(2) + ' mg';
+    if (ag >= 1e-6)     return (g*1e6).toFixed(2)  + ' µg';
+    return g.toExponential(2) + ' g';
+  }
+  // Tooltip attached to "below measurement floor" displays — same wording
+  // wherever the floor is hit, single source of truth.
+  var BELOW_FLOOR_TOOLTIP =
+    'ΔE rounded to 0 Wh — the task was too short or too efficient '
+    + 'to register above the P110 ~1W × 1s poll noise floor. '
+    + 'Try batch mode for reliable µ-scale readings.';
+  function fmtAge(s){
+    if (s == null) return '';
+    if (s < 90)   return Math.round(s) + 's ago';
+    if (s < 5400) return Math.round(s/60) + 'm ago';
+    return Math.round(s/3600) + 'h ago';
+  }
+  function liveBadge(){
+    return '<span title="ElectricityMaps real-time grid intensity" style="color:var(--accent);'
+         + 'font-size:0.6rem;font-family:monospace;letter-spacing:0.06em;padding:0.05rem 0.3rem;'
+         + 'border:1px solid var(--accent);border-radius:2px;margin-left:0.4rem">LIVE</span>';
+  }
+  function estBadge(){
+    return '<span title="Ember 2024 annual mean — fallback when live data is unavailable" '
+         + 'style="color:var(--text-4);font-size:0.6rem;font-family:monospace;letter-spacing:0.06em;'
+         + 'padding:0.05rem 0.3rem;border:1px solid var(--border-3);border-radius:2px;margin-left:0.4rem">EST</span>';
+  }
+
+  // Inline CO2e row, mirroring the look of metricRow(). Reads energy.co2e
+  // baked in by persist.save_result() → carbon.walk_and_enrich(). For older
+  // results without enrichment, returns empty string (no broken row).
+  // When grams === 0 (ΔE below P110 floor), surfaces "below measurement
+  // floor" with a tooltip rather than rendering a misleading "0 g".
+  window.wlCarbonRow = function(energy){
+    if (!energy || !energy.co2e || !energy.co2e.intensity) return '';
+    var c = energy.co2e;
+    var i = c.intensity;
+    var live = i.source === 'live';
+    if (c.grams === 0) {
+      return '<div class="metric" title="' + BELOW_FLOOR_TOOLTIP + '">'
+           + '<span>CO₂e</span>'
+           + '<span class="val" style="color:var(--text-4)">— '
+           + '<span style="color:var(--text-5);font-size:0.7rem;font-family:monospace;'
+           + 'margin-left:0.5rem;font-weight:normal">below measurement floor</span>'
+           + '</span></div>';
+    }
+    var freshness = live
+      ? (i.zone_label + ' · ' + i.g_per_kwh + ' g/kWh · ' + fmtAge(i.age_s))
+      : (i.zone_label + ' · ' + i.g_per_kwh + ' g/kWh · ' + (i.year ? i.year + ' mean' : 'annual mean'));
+    return '<div class="metric"><span>CO₂e</span>'
+         + '<span class="val">' + fmtMass(c.grams)
+         + (live ? liveBadge() : estBadge())
+         + '<span style="color:var(--text-4);font-size:0.7rem;font-family:monospace;'
+         + 'margin-left:0.5rem;font-weight:normal">' + freshness + '</span>'
+         + '</span></div>';
+  };
+
+  // Comparison strip — one block per report, shows the same Wh figure across
+  // home + comparison zones. Home is live (with static fallback); other
+  // zones are static so values don't drift between page loads. Returns a
+  // placeholder synchronously and fills it in once /carbon resolves.
+  window.wlCarbonStrip = function(wh, label){
+    if (wh == null || isNaN(wh)) return '';
+    var elId = 'carbon-strip-' + Math.random().toString(36).slice(2,9);
+    var html = '<div id="' + elId + '" class="carbon-strip" '
+             + 'style="margin:0.75rem 0;padding:0.7rem 0.85rem;background:var(--panel-2);'
+             + 'border:1px solid var(--border-2);font-size:0.78rem">'
+             + '<div style="color:var(--text-4);font-size:0.7rem">'
+             + 'CO₂e — loading grid intensity…</div></div>';
+    setTimeout(function(){ _renderStrip(elId, parseFloat(wh), label || ''); }, 0);
+    return html;
+  };
+
+  async function _renderStrip(elId, wh, label){
+    var el = document.getElementById(elId);
+    if (!el) return;
+    var d = await loadZones();
+    if (!d) {
+      el.innerHTML = '<div style="color:var(--text-4);font-size:0.72rem">'
+                   + 'CO₂e comparison unavailable.</div>';
+      return;
+    }
+    // ΔE rounded to 0 — comparing 0 g across grids is meaningless, so render
+    // a clean placeholder instead of a "0 µg" row for every city.
+    if (wh === 0) {
+      el.innerHTML =
+          '<div title="' + BELOW_FLOOR_TOOLTIP + '" '
+        + 'style="display:flex;align-items:baseline;flex-wrap:wrap;gap:0.4rem 0.75rem">'
+        + '<span style="color:var(--text-4);font-size:0.7rem;letter-spacing:0.04em;'
+        + 'text-transform:uppercase">CO₂e</span>'
+        + '<span style="color:var(--text-3);font-size:1.5rem;font-weight:bold;'
+        + 'font-family:monospace;line-height:1">—</span>'
+        + '<span style="color:var(--text-4);font-size:0.78rem;font-family:monospace">'
+        + 'below P110 measurement floor</span>'
+        + '</div>'
+        + '<div style="color:var(--text-5);font-size:0.7rem;font-family:monospace;margin-top:0.3rem">'
+        + 'ΔE rounded to 0 Wh; task too short or too efficient to lift power above ~1 W × 1 s poll noise. '
+        + 'Try batch mode for reliable µ-scale readings.'
+        + '</div>';
+      return;
+    }
+    var home    = d.home_zone;
+    var homeI   = d.home_intensity || {};
+    var zones   = d.comparison_zones || [];
+    var statics = d.static_table || {};
+
+    // Headline: home-zone gCO2e — the number visitors should walk away with.
+    var homeIntensity = homeI.g_per_kwh;
+    var homeGrams = (homeIntensity != null) ? (wh / 1000) * homeIntensity : null;
+    var homeLive = (homeI.source === 'live');
+    var homeFreshness = homeLive
+      ? fmtAge(homeI.age_s)
+      : (homeI.year ? (homeI.year + ' mean') : 'annual mean');
+    var headlineSubtitle = label ? (label + ' · ' + fmtG(wh) + ' Wh') : (fmtG(wh) + ' Wh');
+
+    // Provider line, only meaningful for LIVE rows.
+    var providerStr = '';
+    if (homeLive) {
+      var prov = homeI.provider || 'live';
+      providerStr = ' · ' + prov;
+    }
+
+    var headlineHtml =
+        '<div style="display:flex;align-items:baseline;flex-wrap:wrap;gap:0.4rem 0.75rem;'
+      + 'margin-bottom:0.3rem">'
+      + '<span style="color:var(--text-4);font-size:0.7rem;letter-spacing:0.04em;'
+      + 'text-transform:uppercase">CO₂e</span>'
+      + '<span style="color:var(--accent);font-size:1.5rem;font-weight:bold;font-family:monospace;'
+      + 'line-height:1">' + (homeGrams != null ? fmtMass(homeGrams) : '—') + '</span>'
+      + (homeLive ? liveBadge() : estBadge())
+      + '<span style="color:var(--text-3);font-size:0.78rem;font-family:monospace">'
+      + 'in ' + (homeI.zone_label || home) + '</span>'
+      + '</div>'
+      + '<div style="color:var(--text-4);font-size:0.72rem;font-family:monospace">'
+      + headlineSubtitle + ' · grid intensity '
+      + (homeIntensity != null
+          ? (homeIntensity + ' g/kWh · ' + homeFreshness + providerStr)
+          : 'unknown')
+      + '</div>';
+
+    // Comparison rows + provenance go inside a collapsed <details>.
+    var comparisonRows = zones.filter(function(z){ return z !== home; }).map(function(z){
+      var s = statics[z] || {};
+      var intensity = s.g_per_kwh;
+      var year      = s.year;
+      var label_    = s.label || z;
+      if (intensity == null) return '';
+      var grams = (wh / 1000) * intensity;
+      var ratio = (homeGrams && homeGrams > 0) ? (grams / homeGrams) : null;
+      var ratioStr = ratio != null
+        ? (ratio >= 1.5 ? ratio.toFixed(1) + '× home' : ratio.toFixed(2) + '× home')
+        : '';
+      return '<div style="display:flex;align-items:baseline;justify-content:space-between;'
+           + 'gap:0.5rem;padding:0.3rem 0.4rem;font-family:monospace">'
+           + '<span style="color:var(--text-2);flex:1;min-width:140px">' + label_ + '</span>'
+           + '<span style="color:var(--text);white-space:nowrap;font-weight:bold;'
+           + 'min-width:90px;text-align:right">' + fmtMass(grams) + '</span>'
+           + '<span style="color:var(--text-4);font-size:0.7rem;white-space:nowrap;'
+           + 'min-width:90px;text-align:right">' + ratioStr + '</span>'
+           + '<span style="color:var(--text-5);font-size:0.7rem;white-space:nowrap;'
+           + 'min-width:160px;text-align:right">'
+           + intensity + ' g/kWh · ' + (year ? year + ' mean' : 'annual mean')
+           + '</span>'
+           + '</div>';
+    }).join('');
+
+    // Optional: live French production mix (Eco2mix only). Sums positive
+    // sources, shows top contributors by share. Hidden if mix_mw absent.
+    var mixHtml = '';
+    if (homeLive && homeI.mix_mw && Object.keys(homeI.mix_mw).length){
+      var mix = homeI.mix_mw;
+      var labels = {nucleaire:'Nuclear', eolien:'Wind', solaire:'Solar',
+                    hydraulique:'Hydro', bioenergies:'Bioenergy',
+                    gaz:'Gas', charbon:'Coal', fioul:'Oil', pompage:'Pumped storage'};
+      var entries = [];
+      var totalPos = 0;
+      Object.keys(mix).forEach(function(k){
+        var mw = mix[k];
+        if (typeof mw === 'number' && mw > 0){ entries.push([k, mw]); totalPos += mw; }
+      });
+      if (totalPos > 0){
+        entries.sort(function(a,b){ return b[1]-a[1]; });
+        var rows = entries.map(function(e){
+          var pct = (e[1] / totalPos) * 100;
+          var pctStr = pct >= 1 ? pct.toFixed(0) + '%' : pct.toFixed(1) + '%';
+          return '<div style="display:flex;justify-content:space-between;'
+               + 'padding:0.15rem 0.4rem;font-family:monospace">'
+               + '<span style="color:var(--text-2)">' + (labels[e[0]] || e[0]) + '</span>'
+               + '<span style="color:var(--text-3)">' + Math.round(e[1]) + ' MW</span>'
+               + '<span style="color:var(--text);min-width:50px;text-align:right">' + pctStr + '</span>'
+               + '</div>';
+        }).join('');
+        mixHtml =
+            '<div style="margin-top:0.6rem;padding-top:0.5rem;border-top:1px solid var(--border-2)">'
+          + '<div style="color:var(--text-5);font-size:0.65rem;letter-spacing:0.04em;'
+          + 'text-transform:uppercase;margin-bottom:0.3rem">'
+          + 'French grid right now (live, via Eco2mix)</div>'
+          + rows
+          + '</div>';
+      }
+    }
+
+    var formulaHtml =
+        '<div style="margin-top:0.6rem;padding-top:0.5rem;border-top:1px solid var(--border-2);'
+      + 'color:var(--text-4);font-size:0.7rem;line-height:1.55">'
+      + '<div style="margin-bottom:0.25rem"><strong style="color:var(--text-3)">How this is calculated</strong></div>'
+      + 'gCO₂e&nbsp;=&nbsp;Wh × (g/kWh) ÷ 1000<br>'
+      + 'Live (home zone, France): <a href="https://www.rte-france.com/eco2mix" target="_blank" rel="noopener" '
+      + 'style="color:var(--text-3)">Eco2mix</a> — RTE/Etalab official French TSO data, refreshed every 15 min. '
+      + 'Falls back to <a href="https://www.electricitymaps.com" target="_blank" rel="noopener" '
+      + 'style="color:var(--text-3)">ElectricityMaps</a>, then to estimated if both unavailable.<br>'
+      + 'Estimated (other zones &amp; fallback): <a href="https://ember-energy.org" target="_blank" rel="noopener" '
+      + 'style="color:var(--text-3)">Ember</a> 2024 annual mean grid carbon intensity. Static so values '
+      + 'do not drift between page loads.<br>'
+      + 'Raw module status: <a href="/carbon" style="color:var(--text-3)">/carbon</a>'
+      + '</div>';
+
+    el.innerHTML =
+        headlineHtml
+      + '<details style="margin-top:0.6rem">'
+      + '<summary style="cursor:pointer;color:var(--text-3);font-size:0.78rem;'
+      + 'list-style:none;padding:0.25rem 0;border-top:1px solid var(--border-2)">'
+      + '<span style="color:var(--text-4)">▸</span> '
+      + 'If this had run elsewhere · how this is calculated'
+      + '</summary>'
+      + '<div style="margin-top:0.5rem">'
+      + '<div style="color:var(--text-5);font-size:0.65rem;letter-spacing:0.04em;'
+      + 'text-transform:uppercase;margin-bottom:0.3rem">'
+      + 'Same ' + fmtG(wh) + ' Wh, on other grids (Ember 2024 annual means)</div>'
+      + comparisonRows
+      + mixHtml
+      + formulaHtml
+      + '</div>'
+      + '</details>';
+  }
+})();
+</script>
+"""
+
 # "Report an issue" link in every page footer — points to GitHub issue tracker.
 _ISSUES_LINK = (
     '<div style="margin-top:0.75rem;font-family:monospace;font-size:0.72rem;color:var(--text-5)">'
@@ -313,7 +590,7 @@ _FOOTER = (
     f'{_BASE_STYLES}'
     f'<footer style="margin-top:3rem;padding-top:1rem;border-top:1px solid var(--panel)">'
     f'{_LOGO}{_ISSUES_LINK}</footer>'
-    f'{_QUEUE_BADGE}{_LIVE_JS}'
+    f'{_QUEUE_BADGE}{_LIVE_JS}{_CARBON_JS}'
 )
 
 # Confidence flag popover — inject into any page that shows .conf-badge elements.
@@ -521,6 +798,15 @@ async def live_json():
         "queue_depth":  len(pending_queue) + (1 if current_job_id else 0),
         "paused":       Path(PAUSE_FLAG).exists(),
     }
+
+
+@app.get("/carbon")
+async def carbon_json():
+    """Diagnostic + UI feed for the carbon module. Returns the home-zone
+    intensity (live or static fallback) and the comparison-cities table.
+    Used by the shared `wlCarbonStrip` JS helper to render the per-result
+    "if this had run elsewhere" comparison strip."""
+    return carbon.status()
 
 # --- Video page ---
 
@@ -1022,6 +1308,7 @@ async def video_page(request: Request):
         return `
         <div class="single-report">
             <h2>Energy Report — ${{r.preset_label}}</h2>
+            ${{wlCarbonStrip(e.delta_e_wh, r.preset_label)}}
             <div class="section-title">Encode</div>
             ${{metricRow('Preset', r.preset_detail)}}
             ${{metricRow('Duration', e.delta_t_s, 's')}}
@@ -1032,6 +1319,7 @@ async def video_page(request: Request):
             ${{metricRow('Task mean', e.w_task, 'W')}}
             ${{metricRow('Delta (ΔW)', e.delta_w, 'W')}}
             ${{metricRow('Energy (ΔE)', e.delta_e_wh, 'Wh')}}
+            ${{wlCarbonRow(e)}}
             ${{metricRow('Polls', e.poll_count)}}
             <div class="section-title">Thermals</div>
             ${{metricRow('CPU base → peak', t.cpu_base + ' → ' + t.cpu_peak, '°C')}}
@@ -1075,6 +1363,7 @@ async def video_page(request: Request):
                 ${{metricRow('Task mean', e.w_task, 'W')}}
                 ${{metricRow('Peak delta', e.delta_w, 'W')}}
                 ${{metricRow('Energy (ΔE)', e.delta_e_wh + (isEnergyWinner ? ' ✓' : ''), 'Wh')}}
+                ${{wlCarbonRow(e)}}
                 ${{metricRow('Polls', e.poll_count)}}
                 <div class="section-title">Thermals</div>
                 ${{metricRow('CPU base → peak', t.cpu_base + ' → ' + t.cpu_peak, '°C')}}
@@ -1087,9 +1376,22 @@ async def video_page(request: Request):
             </div>`;
         }}
 
+        // Carbon strip for the comparison report uses the lower of the two
+        // energy figures (the more efficient option) — that's the headline
+        // number for "given this is the best result here, here's how it'd
+        // play out elsewhere".
+        const cpuWh = (cpu.energy && cpu.energy.delta_e_wh) || null;
+        const gpuWh = (gpu.energy && gpu.energy.delta_e_wh) || null;
+        const stripWh = (cpuWh != null && gpuWh != null)
+            ? Math.min(cpuWh, gpuWh)
+            : (cpuWh != null ? cpuWh : gpuWh);
+        const stripLbl = (cpuWh != null && gpuWh != null && cpuWh <= gpuWh) ? cpu.preset_label
+                       : (cpuWh != null && gpuWh != null) ? gpu.preset_label
+                       : (cpuWh != null ? cpu.preset_label : gpu.preset_label);
         return `
         <div class="report">
             <h2>Comparison Report</h2>
+            ${{wlCarbonStrip(stripWh, stripLbl)}}
             <div class="analysis-box">
                 <h3>Finding</h3>
                 <div class="finding">${{a.finding}}</div>
@@ -1151,6 +1453,7 @@ async def video_page(request: Request):
                     ${{metricRow('Baseline', e.w_base, 'W')}}
                     ${{metricRow('ΔW', e.delta_w, 'W')}}
                     ${{metricRow('ΔE', e.delta_e_wh, 'Wh')}}
+                    ${{wlCarbonRow(e)}}
                     ${{metricRow('Polls', e.poll_count)}}
                     ${{metricRow('CPU peak', t.cpu_peak, '°C')}}
                     ${{metricRow('GPU peak', t.gpu_peak, '°C')}}
@@ -1169,9 +1472,13 @@ async def video_page(request: Request):
             </details>`;
         }}).join('');
 
+        // Strip uses the most-efficient codec/device's energy as the headline.
+        const stripWh = bestE && bestE.delta_e_wh != null ? bestE.delta_e_wh : null;
+        const stripLbl = bestE ? bestE.label : 'Most efficient codec';
         return `
         <div class="report">
             <h2>All Codecs — Energy &amp; Speed Matrix</h2>
+            ${{wlCarbonStrip(stripWh, stripLbl)}}
             <table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:0.5rem">
                 <thead><tr style="color:var(--text-4);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em">
                     <th style="text-align:left;padding:0.3rem 0.5rem 0.5rem 0">Codec</th>
@@ -1807,6 +2114,7 @@ async def llm_page():
         const modeNote = r.warm ? '🌡 Warm (model pre-loaded)' : '❄ Cold (model unloaded before baseline)';
         return `<div class="result-box">
                 <h2>Energy Report — ${{r.model_label}} · ${{r.task_label}}</h2>
+                ${{wlCarbonStrip(e.delta_e_wh, r.model_label + ' · ' + r.task_label)}}
                 <div class="section-title">Inference</div>
                 <div class="metric"><span>Model</span><span class="val">${{r.model_label}} (${{r.model_params}})</span></div>
                 <div class="metric"><span>Task</span><span class="val">${{r.task_label}}</span></div>
@@ -1819,6 +2127,7 @@ async def llm_page():
                 <div class="metric"><span>Task mean</span><span class="val">${{e.w_task}} W</span></div>
                 <div class="metric"><span>Delta (ΔW)</span><span class="val">${{e.delta_w}} W</span></div>
                 <div class="metric"><span>Energy (ΔE)</span><span class="val">${{e.delta_e_wh}} Wh</span></div>
+                ${{wlCarbonRow(e)}}
                 <div class="metric"><span>Energy/token</span>
                     <span class="val">${{e.mwh_per_token}} mWh/token</span></div>
                 <div class="metric"><span>Polls</span><span class="val">${{e.poll_count}}</span></div>
@@ -1852,6 +2161,7 @@ async def llm_page():
         }}).join('');
         return `<div class="result-box">
                 <h2>Batch Report — ${{r.model_label}} · ${{r.task_label}}</h2>
+                ${{wlCarbonStrip(agg.delta_e_wh_mean, r.model_label + ' · ' + r.task_label + ' (mean of ' + r.repeats + ')')}}
                 <div class="section-title">Run parameters</div>
                 <div class="metric"><span>Model</span><span class="val">${{r.model_label}} (${{r.model_params}})</span></div>
                 <div class="metric"><span>Task</span><span class="val">${{r.task_label}}</span></div>
@@ -1896,8 +2206,15 @@ async def llm_page():
         const ce = cpu.energy, ge = gpu.energy;
         const ci = cpu.inference, gi = gpu.inference;
         const winnerColor = (winner, side) => winner === side ? '#00ff99' : '#888';
+        // Strip uses the lower (more efficient) of the two energies.
+        const _stripWh = (ce.delta_e_wh != null && ge.delta_e_wh != null)
+            ? Math.min(ce.delta_e_wh, ge.delta_e_wh)
+            : (ce.delta_e_wh != null ? ce.delta_e_wh : ge.delta_e_wh);
+        const _stripLbl = r.model_label + ' · ' + r.task_label
+            + ' (' + (a.energy_winner ? a.energy_winner + ' wins' : 'best of CPU/GPU') + ')';
         return `<div class="result-box">
             <h2>CPU vs GPU — ${{r.model_label}} · ${{r.task_label}}</h2>
+            ${{wlCarbonStrip(_stripWh, _stripLbl)}}
             <div style="background:#0d1a0d;border:1px solid #00ff9933;
                         padding:1rem;margin-bottom:1.25rem;font-size:0.82rem;line-height:1.7">
               ${{a.finding}}
@@ -1910,6 +2227,7 @@ async def llm_page():
                 <div class="metric"><span>Duration</span><span class="val">${{ci.duration_s}}s</span></div>
                 <div class="metric"><span>ΔE total</span>
                   <span class="val" style="color:${{winnerColor(a.energy_winner,'CPU')}}">${{ce.delta_e_wh}} Wh</span></div>
+                ${{wlCarbonRow(ce)}}
                 <div class="metric"><span>mWh/token</span>
                   <span class="val" style="color:${{winnerColor(a.mwh_winner,'CPU')}}">${{ce.mwh_per_token}}</span></div>
                 <div class="metric"><span>ΔW</span><span class="val">${{ce.delta_w}} W</span></div>
@@ -1922,6 +2240,7 @@ async def llm_page():
                 <div class="metric"><span>Duration</span><span class="val">${{gi.duration_s}}s</span></div>
                 <div class="metric"><span>ΔE total</span>
                   <span class="val" style="color:${{winnerColor(a.energy_winner,'GPU')}}">${{ge.delta_e_wh}} Wh</span></div>
+                ${{wlCarbonRow(ge)}}
                 <div class="metric"><span>mWh/token</span>
                   <span class="val" style="color:${{winnerColor(a.mwh_winner,'GPU')}}">${{ge.mwh_per_token}}</span></div>
                 <div class="metric"><span>ΔW</span><span class="val">${{ge.delta_w}} W</span></div>
@@ -1945,6 +2264,7 @@ async def llm_page():
                 <div class="metric"><span>Tokens/sec</span><span class="val">${{i.tokens_per_sec}}</span></div>
                 <div class="metric"><span>Duration</span><span class="val">${{i.duration_s}}s</span></div>
                 <div class="metric"><span>ΔE</span><span class="val">${{e.delta_e_wh}} Wh</span></div>
+                ${{wlCarbonRow(e)}}
                 <div class="metric"><span>mWh/token</span><span class="val">${{e.mwh_per_token}}</span></div>
                 <div class="metric"><span>ΔW</span><span class="val">${{e.delta_w}} W</span></div>
                 <div style="margin-top:0.5rem;font-size:0.82rem">${{e.confidence.flag}} ${{e.confidence.label}}</div>
@@ -1952,8 +2272,11 @@ async def llm_page():
                 <div class="response-box">${{i.response}}</div>
             </div>`;
         }}).join('');
+        // Headline Wh = T3 (long generation), the largest of the three tasks.
+        const _t3 = r.tasks && r.tasks.T3 && r.tasks.T3.energy ? r.tasks.T3.energy.delta_e_wh : null;
         return `<div class="result-box">
             <h2>All Tasks — ${{r.model_label}} (${{r.model_params}})</h2>
+            ${{wlCarbonStrip(_t3, r.model_label + ' · T3 long generation')}}
             <div style="color:var(--text-3);font-size:0.78rem;margin-bottom:1rem">
                 ${{r.warm ? '🌡 Warm' : '❄ Cold'}} · ${{r.device.toUpperCase()}} · 3 tasks
             </div>
@@ -2626,6 +2949,7 @@ async def rag_page():
         document.getElementById('status').innerHTML = `
             <div class="result-box">
                 <h2>Result — ${{r.model_label}} · ${{ragModeLabels[r.rag_mode] || r.rag_mode}}</h2>
+                ${{wlCarbonStrip(e.delta_e_wh, r.model_label + ' · ' + (ragModeLabels[r.rag_mode] || r.rag_mode))}}
                 <div class="section-title">Question</div>
                 <div style="color:var(--text-2);font-size:0.82rem;margin-bottom:0.75rem">${{r.question}}</div>
                 ${{retrievalHtml}}
@@ -2638,6 +2962,7 @@ async def rag_page():
                 <div class="metric"><span>Task mean</span><span class="val">${{e.w_task}} W</span></div>
                 <div class="metric"><span>ΔW</span><span class="val">${{e.delta_w}} W</span></div>
                 <div class="metric"><span>ΔE</span><span class="val">${{e.delta_e_wh}} Wh</span></div>
+                ${{wlCarbonRow(e)}}
                 <div class="metric"><span>mWh/token</span><span class="val">${{e.mwh_per_token ?? '—'}}</span></div>
                 <div class="metric"><span>Confidence</span>
                     <span class="val conf-badge">${{conf.flag||'—'}} ${{conf.label||''}}</span></div>
@@ -4810,9 +5135,13 @@ function renderImageBoth(r) {{
   const a = r.analysis;
   const cpuWinsEnergy = a.energy_winner === 'cpu';
   const gpuWinsEnergy = a.energy_winner === 'gpu';
+  const _stripWh = (r.cpu && r.cpu.energy && r.gpu && r.gpu.energy)
+    ? Math.min(r.cpu.energy.delta_e_wh, r.gpu.energy.delta_e_wh)
+    : ((r.cpu && r.cpu.energy && r.cpu.energy.delta_e_wh) || (r.gpu && r.gpu.energy && r.gpu.energy.delta_e_wh));
   document.getElementById('status').innerHTML = `
     <div class="result-box">
       <h2>CPU vs GPU — Image Generation</h2>
+      ${{wlCarbonStrip(_stripWh, 'Image gen · most efficient device')}}
       <div style="background:var(--panel);border:1px solid var(--border-3);padding:0.75rem 1rem;margin-bottom:1.25rem;font-size:0.85rem;color:var(--text-2)">
         ${{a.finding}}
       </div>
@@ -4849,9 +5178,13 @@ function _modelCard(side_r) {{
 
 function renderCompareModels(r) {{
   const a = r.analysis;
+  const _stripWh = (r.small && r.small.energy && r.large && r.large.energy)
+    ? Math.min(r.small.energy.delta_e_wh, r.large.energy.delta_e_wh)
+    : ((r.small && r.small.energy && r.small.energy.delta_e_wh) || (r.large && r.large.energy && r.large.energy.delta_e_wh));
   document.getElementById('status').innerHTML = `
     <div class="result-box">
       <h2>SD-Turbo vs SDXL-Turbo — Same Prompt + Seed</h2>
+      ${{wlCarbonStrip(_stripWh, 'Image gen · smaller of the two models')}}
       <div style="background:var(--panel);border:1px solid var(--border-3);padding:0.75rem 1rem;margin-bottom:1.25rem;font-size:0.85rem;color:var(--text-2)">
         ${{a.finding}}
       </div>
@@ -4884,6 +5217,7 @@ function renderResult(r) {{
   document.getElementById('status').innerHTML = `
     <div class="result-box">
       <h2>Result</h2>
+      ${{wlCarbonStrip(e.delta_e_wh, 'Image generation total run')}}
       <div class="kpis">
         <div class="kpi">
           <div class="val">${{fmt(e.wh_per_image,4)}} Wh</div>
@@ -5592,6 +5926,15 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
   <div class="open-q"><span class="marker">&#9658;</span><span><strong>Baseline drift.</strong> The server&rsquo;s idle power occasionally drifts from ~51W to ~58W (thermal state, background processes). The per-run baseline capture mitigates this, but it introduces variance between runs taken at different times.</span></div>
 
   <div class="open-q"><span class="marker">&#9658;</span><span><strong>PSU efficiency curve.</strong> Wall power includes PSU conversion losses, which are non-linear (PSUs are less efficient at low and very high loads). Two tasks that consume the same <em>internal</em> power may report different wall-power deltas depending on where they sit on the PSU efficiency curve.</span></div>
+
+  <h2>From energy to CO<sub>2</sub>e</h2>
+  <p>Every Wh figure on this site is also shown as gCO<sub>2</sub>e — Wh &times; the carbon intensity of the electricity that produced it. Two data sources, with explicit "live" or "estimated" badges so the source is never ambiguous:</p>
+  <ul>
+    <li><strong>Live</strong> — for the home zone (where this server runs, currently France). Pulled every 5 minutes from <a href="https://www.electricitymaps.com" style="color:var(--accent);text-decoration:none">ElectricityMaps</a>; values older than 30 minutes fall back to the static estimate. The "LIVE" badge is shown in the UI when this path is active.</li>
+    <li><strong>Estimated</strong> — annual mean grid carbon intensity per country, from <a href="https://ember-energy.org" style="color:var(--accent);text-decoration:none">Ember</a>'s 2024 yearly electricity data. This is the fallback when live data is unavailable, and is also used for all comparison cities (Warsaw, London, etc.) so those figures don't drift between page loads.</li>
+  </ul>
+  <p>Both sources are explicit in the UI and recorded in the saved result JSON, so any cited figure is traceable back to <em>which</em> intensity number was used at measurement time. CSV exports include <code>co2e_g</code>, <code>co2e_intensity_g_per_kwh</code> and <code>co2e_source</code> columns. Raw module status is available at <a href="/carbon" style="color:var(--accent);text-decoration:none">/carbon</a>.</p>
+  <p style="color:var(--text-3);font-size:0.85rem">Why "estimated" sometimes? The free ElectricityMaps tier covers the home zone only; other zones use static annual means. And the home zone falls back to static if the API is unreachable. The fallback is conservative — values stay sensible even when the network does not.</p>
 
   <h2 id="open">Open Questions</h2>
 

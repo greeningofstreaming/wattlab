@@ -4,16 +4,25 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import carbon
+
 RESULTS_DIR = Path("/home/gos/wattlab/results")
 
 
 def save_result(job_type: str, job_id: str, data: dict) -> Path:
-    """Write a completed job result to results/{job_type}/{date}_{job_id}.json."""
+    """Write a completed job result to results/{job_type}/{date}_{job_id}.json.
+
+    Single insertion point for CO2e enrichment: walks the result tree and
+    attaches a `co2e` block to every nested `energy` dict (see carbon.py).
+    The intensity in use at save time is recorded inline so historical
+    results stay accurate even if the live grid mix changes later.
+    """
     out_dir = RESULTS_DIR / job_type
     out_dir.mkdir(parents=True, exist_ok=True)
     date_str = datetime.now().strftime("%Y-%m-%d")
     path = out_dir / f"{date_str}_{job_id}.json"
     payload = {"job_id": job_id, "saved_at": datetime.now().isoformat(), **data}
+    carbon.walk_and_enrich(payload)
     path.write_text(json.dumps(payload, indent=2))
     return path
 
@@ -54,6 +63,7 @@ def to_csv(job_type: str, data: dict) -> str:
             "job_id", "saved_at", "prompt", "full_prompt", "modifier",
             "steps", "size", "model", "load_s", "gen_s", "total_s",
             "w_base", "w_task", "delta_w", "delta_e_wh",
+            "co2e_g", "co2e_intensity_g_per_kwh", "co2e_source", "co2e_zone",
             "poll_count", "confidence", "cpu_base", "cpu_end",
         ]
         rows = _image_rows(data)
@@ -61,7 +71,9 @@ def to_csv(job_type: str, data: dict) -> str:
         fieldnames = [
             "job_id", "saved_at", "mode", "preset", "duration_s",
             "output_size_mb",
-            "w_base", "w_task", "delta_w", "delta_e_wh", "poll_count", "confidence",
+            "w_base", "w_task", "delta_w", "delta_e_wh",
+            "co2e_g", "co2e_intensity_g_per_kwh", "co2e_source", "co2e_zone",
+            "poll_count", "confidence",
             "cpu_base", "cpu_peak", "cpu_mean",
             "gpu_base", "gpu_peak", "gpu_mean", "gpu_ppt_mean_w", "gpu_ppt_peak_w",
             "ffmpeg_cmd",
@@ -72,6 +84,7 @@ def to_csv(job_type: str, data: dict) -> str:
             "job_id", "saved_at", "model", "task", "duration_s",
             "output_tokens", "tokens_per_sec",
             "w_base", "w_task", "delta_w", "delta_e_wh", "mwh_per_token",
+            "co2e_g", "co2e_intensity_g_per_kwh", "co2e_source", "co2e_zone",
             "poll_count", "confidence", "cpu_base", "gpu_base",
             "response",
         ]
@@ -83,6 +96,19 @@ def to_csv(job_type: str, data: dict) -> str:
 
 
 # --- Internal helpers ---
+
+def _co2e_fields(energy: dict) -> dict:
+    """Pull the four flat CO2e CSV fields out of an `energy` dict's `co2e`
+    block. Returns empty values if the block is absent (older results)."""
+    c = (energy or {}).get("co2e") or {}
+    i = c.get("intensity") or {}
+    return {
+        "co2e_g": c.get("grams"),
+        "co2e_intensity_g_per_kwh": i.get("g_per_kwh"),
+        "co2e_source": i.get("source"),
+        "co2e_zone": i.get("zone"),
+    }
+
 
 def _summarise(job_type: str, data: dict) -> dict:
     summary = {"job_id": data.get("job_id"), "saved_at": data.get("saved_at")}
@@ -234,6 +260,7 @@ def _image_rows(data: dict) -> list:
         "total_s": gen.get("total_s"),
         "w_base": e.get("w_base"), "w_task": e.get("w_task"),
         "delta_w": e.get("delta_w"), "delta_e_wh": e.get("delta_e_wh"),
+        **_co2e_fields(e),
         "poll_count": e.get("poll_count"),
         "confidence": e.get("confidence", {}).get("label"),
         "cpu_base": t.get("cpu_base"), "cpu_end": t.get("cpu_end"),
@@ -271,6 +298,7 @@ def _video_result_row(common: dict, r: dict) -> dict:
         "output_size_mb": r.get("output_size_mb"),
         "w_base": e.get("w_base"), "w_task": e.get("w_task"),
         "delta_w": e.get("delta_w"), "delta_e_wh": e.get("delta_e_wh"),
+        **_co2e_fields(e),
         "poll_count": e.get("poll_count"),
         "confidence": e.get("confidence", {}).get("label"),
         "cpu_base": t.get("cpu_base"), "cpu_peak": t.get("cpu_peak"), "cpu_mean": t.get("cpu_mean"),
@@ -294,6 +322,7 @@ def _llm_rows(data: dict) -> list:
             "w_base": e.get("w_base"), "w_task": e.get("w_task"),
             "delta_w": e.get("delta_w"), "delta_e_wh": e.get("delta_e_wh"),
             "mwh_per_token": e.get("mwh_per_token"),
+            **_co2e_fields(e),
             "poll_count": e.get("poll_count"),
             "confidence": e.get("confidence", {}).get("label"),
             "cpu_base": t.get("cpu_base"), "gpu_base": t.get("gpu_base"),
