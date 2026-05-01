@@ -5780,7 +5780,7 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
       <strong>Model unload</strong> (LLM/RAG only). Send <code>keep_alive=0</code> to Ollama and wait 3 seconds for GPU memory release. Ensures a cold start when cold-inference mode is selected.
     </li>
     <li>
-      <strong>Baseline capture.</strong> Poll the Tapo P110 smart plug at 1-second intervals for a configurable period (default: 10 polls). The mean of these readings becomes W<sub>base</sub> &mdash; the server&rsquo;s idle power draw.
+      <strong>Baseline capture.</strong> Poll the Tapo P110 smart plug at 1-second intervals for a configurable period (currently <code>{BASELINE_POLLS}</code> polls &mdash; configurable in Settings). The mean of these readings becomes W<sub>base</sub> &mdash; the server&rsquo;s idle power draw.
     </li>
     <li>
       <strong>Lock.</strong> Acquire <code>/tmp/gos-measure.lock</code> to prevent concurrent measurements from overlapping. A FIFO queue manages waiting jobs.
@@ -5799,7 +5799,7 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
     </li>
   </ol>
 
-  <p>Between sequential runs (e.g., CPU vs GPU comparison), a configurable cooldown (default: 60 seconds) allows the system to return to thermal equilibrium.</p>
+  <p>Between sequential runs (e.g., CPU vs GPU comparison), a configurable cooldown (currently <code>{VIDEO_COOLDOWN_S}</code> seconds &mdash; configurable in Settings) allows the system to return to thermal equilibrium.</p>
 
   <h2 id="energy">Energy Calculation</h2>
 
@@ -5842,12 +5842,12 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
     <tr>
       <td><span class="badge">&#x1F7E2;</span></td>
       <td><strong>Repeatable</strong> &mdash; Signal clearly exceeds the measured noise floor with enough poll samples to be reliable.</td>
-      <td>&Delta;W &gt; 5 &times; noise<sub>W</sub> and &ge; 10 polls</td>
+      <td>&Delta;W &gt; <code>{CONF_GREEN_X}</code> &times; noise<sub>W</sub> and &ge; <code>{CONF_GREEN_POLLS}</code> polls</td>
     </tr>
     <tr>
       <td><span class="badge">&#x1F7E1;</span></td>
       <td><strong>Early insight</strong> &mdash; Signal is detectable above noise but more data or a longer run would strengthen the result.</td>
-      <td>&Delta;W &ge; 2 &times; noise<sub>W</sub> or &ge; 5 polls</td>
+      <td>&Delta;W &ge; <code>{CONF_YELLOW_X}</code> &times; noise<sub>W</sub> or &ge; <code>{CONF_YELLOW_POLLS}</code> polls</td>
     </tr>
     <tr>
       <td><span class="badge">&#x1F534;</span></td>
@@ -5866,7 +5866,7 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
   </div>
 
   <div class="callout">
-    <strong>P110 and total system noise:</strong> The Tapo P110 smart plug contributes hardware quantisation noise (~1W resolution when polled via local API). However, the dominant noise sources in practice are OS background processes (apt, cron, systemd timers) and thermal drift between runs. Focus mode suppresses the worst offenders, but residual variance remains. The variance calibration process measures this combined noise empirically and stores it as the reference for all confidence calculations.
+    <strong>P110 and total system noise:</strong> The Tapo P110 smart plug exposes power readings at <strong>1&nbsp;W resolution via its local API</strong> (the path WattLab currently uses, chosen for portability and the Python <code>tapo</code> library&rsquo;s reliability). The underlying instrument is more precise &mdash; <strong>~1&nbsp;mW resolution via direct device read</strong> &mdash; so future versions could lower the hardware noise floor by ~3 orders of magnitude if needed. In practice, however, the dominant noise sources are OS background processes (apt, cron, systemd timers) and thermal drift between runs, not hardware quantisation. Focus mode suppresses the worst offenders, but residual variance remains. The variance calibration process measures this combined noise empirically and stores it as the reference for all confidence calculations.
   </div>
 
   <p>The confidence framework follows GoS&rsquo;s broader principle: <em>if it can&rsquo;t be measured, it shouldn&rsquo;t be asserted.</em> A &#x1F534; result is not a failure &mdash; it&rsquo;s an honest signal that the measurement instrument isn&rsquo;t sensitive enough for that task. Publishing it transparently is more useful than hiding it.</p>
@@ -5928,13 +5928,14 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
   <div class="open-q"><span class="marker">&#9658;</span><span><strong>PSU efficiency curve.</strong> Wall power includes PSU conversion losses, which are non-linear (PSUs are less efficient at low and very high loads). Two tasks that consume the same <em>internal</em> power may report different wall-power deltas depending on where they sit on the PSU efficiency curve.</span></div>
 
   <h2>From energy to CO<sub>2</sub>e</h2>
-  <p>Every Wh figure on this site is also shown as gCO<sub>2</sub>e — Wh &times; the carbon intensity of the electricity that produced it. Two data sources, with explicit "live" or "estimated" badges so the source is never ambiguous:</p>
-  <ul>
-    <li><strong>Live</strong> — for the home zone (where this server runs, currently France). Pulled every 5 minutes from <a href="https://www.electricitymaps.com" style="color:var(--accent);text-decoration:none">ElectricityMaps</a>; values older than 30 minutes fall back to the static estimate. The "LIVE" badge is shown in the UI when this path is active.</li>
-    <li><strong>Estimated</strong> — annual mean grid carbon intensity per country, from <a href="https://ember-energy.org" style="color:var(--accent);text-decoration:none">Ember</a>'s 2024 yearly electricity data. This is the fallback when live data is unavailable, and is also used for all comparison cities (Warsaw, London, etc.) so those figures don't drift between page loads.</li>
-  </ul>
-  <p>Both sources are explicit in the UI and recorded in the saved result JSON, so any cited figure is traceable back to <em>which</em> intensity number was used at measurement time. CSV exports include <code>co2e_g</code>, <code>co2e_intensity_g_per_kwh</code> and <code>co2e_source</code> columns. Raw module status is available at <a href="/carbon" style="color:var(--accent);text-decoration:none">/carbon</a>.</p>
-  <p style="color:var(--text-3);font-size:0.85rem">Why "estimated" sometimes? The free ElectricityMaps tier covers the home zone only; other zones use static annual means. And the home zone falls back to static if the API is unreachable. The fallback is conservative — values stay sensible even when the network does not.</p>
+  <p>Every Wh figure on this site is also shown as gCO<sub>2</sub>e &mdash; Wh &times; the carbon intensity of the electricity that produced it. Three data sources arranged as a fallback ladder, with explicit <strong>LIVE</strong> or <strong>EST</strong> badges so the source is never ambiguous:</p>
+  <ol>
+    <li><strong>Live, primary (home zone, France):</strong> <a href="https://www.rte-france.com/eco2mix" style="color:var(--accent);text-decoration:none">Eco2mix</a> &mdash; the official RTE / Etalab French TSO real-time grid data. No authentication required; refreshed every <strong>15 minutes</strong>. Includes the precomputed <code>taux_co2</code> field (gCO<sub>2</sub>/kWh) directly from RTE, plus the full live production mix (nuclear, wind, solar, hydro, gas, coal, etc.). When this path resolves, the UI shows a green <strong>LIVE</strong> badge and surfaces the live mix breakdown in the comparison-strip dropdown.</li>
+    <li><strong>Live, backup:</strong> <a href="https://www.electricitymaps.com" style="color:var(--accent);text-decoration:none">ElectricityMaps</a> &mdash; third-party aggregator covering many zones. Used only if Eco2mix is unreachable for the home zone. Requires an API token (configured in the lab&rsquo;s <code>.env</code>); free tier covers a single zone.</li>
+    <li><strong>Estimated, fallback:</strong> annual mean grid carbon intensity per country, from <a href="https://ember-energy.org" style="color:var(--accent);text-decoration:none">Ember</a>&rsquo;s 2024 yearly electricity data. This is the floor when no live source is available, <em>and</em> it is also used for all comparison cities (Warsaw, London, Berlin, &hellip;) so those figures stay stable across page loads rather than drifting between two loads five minutes apart.</li>
+  </ol>
+  <p>Both source and value are recorded in the saved result JSON at measurement time, so any cited figure is traceable back to <em>which</em> intensity number was used. CSV exports include <code>co2e_g</code>, <code>co2e_intensity_g_per_kwh</code>, <code>co2e_source</code>, and <code>co2e_zone</code> columns. The raw module status (live cache, source, age, fallback state) is available at <a href="/carbon" style="color:var(--accent);text-decoration:none">/carbon</a>.</p>
+  <p style="color:var(--text-3);font-size:0.85rem">Why &ldquo;estimated&rdquo; sometimes? Comparison cities never go live by design (so they don&rsquo;t drift between page loads). The home zone falls back to estimated if Eco2mix and ElectricityMaps are both unreachable, or if the most recent live reading is older than 30 minutes. The ladder degrades gracefully: numbers stay sensible even when the network does not.</p>
 
   <h2 id="open">Open Questions</h2>
 
@@ -5965,4 +5966,17 @@ _METHODOLOGY_HTML = """<!DOCTYPE html>
 
 @app.get("/methodology", response_class=HTMLResponse)
 async def methodology_page():
-    return _METHODOLOGY_HTML
+    # Inject live settings into placeholder fields so the methodology page
+    # can never silently drift from the actual configuration in settings.json.
+    # See CR-002 for context — `baseline_polls`, `video_cooldown_s`, and the
+    # confidence thresholds (variance multipliers + poll counts) were
+    # previously hard-coded in the prose and table, and contradicted the
+    # running config any time settings were changed.
+    s = cfg.load()
+    return (_METHODOLOGY_HTML
+            .replace("{BASELINE_POLLS}",     str(s.get("baseline_polls",     "—")))
+            .replace("{VIDEO_COOLDOWN_S}",   str(s.get("video_cooldown_s",   "—")))
+            .replace("{CONF_GREEN_X}",       str(s.get("variance_green_x",   "—")))
+            .replace("{CONF_YELLOW_X}",      str(s.get("variance_yellow_x",  "—")))
+            .replace("{CONF_GREEN_POLLS}",   str(s.get("conf_green_polls",   "—")))
+            .replace("{CONF_YELLOW_POLLS}",  str(s.get("conf_yellow_polls",  "—"))))
