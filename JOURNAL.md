@@ -7,6 +7,72 @@ Scope: device layer only (GoS1). Network, CDN, and CPE explicitly excluded.
 
 ---
 
+## Session 16 — 2026-04-30 / 2026-05-01
+
+### What we did
+
+**CO₂e measurement + Eco2mix integration · CR-002 methodology accuracy · first automated test suite · conference-prep strategy package**
+
+The session split across two days but reads as one block of conference-prep work (training course is May 18 dry-run, mid-June stage).
+
+### Code
+
+- **`carbon.py`** (new module, ~290 lines) — single home for Wh→gCO₂e conversion. Three-tier fallback ladder: **Eco2mix (RTE/Etalab official French TSO data, 15-min cadence, no auth)** → **ElectricityMaps (paid backup, requires token)** → **Ember 2024 static annual means** (always-floor + comparison cities). Background poller refreshes home-zone live cache every 5 minutes. `walk_and_enrich(payload)` walks the result tree and injects a `co2e` block on every nested `energy` dict — single insertion point covers every job mode (single, both, all_codecs, batch, all, all_both, rag, rag_compare, compare_models). IPCC AR6 emission factors documented as a fallback if Eco2mix ever drops `taux_co2`.
+- **`persist.py`** — calls `carbon.walk_and_enrich(payload)` at save time. CSV exports gain `co2e_g`, `co2e_intensity_g_per_kwh`, `co2e_source`, `co2e_zone` columns across video/image/llm/rag.
+- **`main.py` `_CARBON_JS`** (~150 lines of JS injected via `_FOOTER`) — defines `wlCarbonRow(e)` (inline CO₂e row under any Energy ΔE) and `wlCarbonStrip(wh, label)` (per-result "if this had run elsewhere" block, with collapsed `<details>` showing comparison cities + live French production mix breakdown + formula provenance). Headline up top with big LIVE/EST badge. `fmtMass` auto-switches g/mg/µg by magnitude (~2 sig figs across 6 orders). When ΔE rounds to 0 (below P110 floor), renders `—` with a "below measurement floor" tooltip rather than misleading "0 g".
+- **CR-002 methodology accuracy pass** — `/methodology` now uses placeholders for `baseline_polls`, `video_cooldown_s`, and the four confidence thresholds (`variance_green_x`/`variance_yellow_x`/`conf_green_polls`/`conf_yellow_polls`); `methodology_page()` route handler injects values from `cfg.load()` at request time. Drift is structurally impossible. P110 quantisation copy fixed to state both 1 W via API (current path) and 1 mW via direct device read (instrument capability). "From energy to CO₂e" section rewritten to reflect the actual three-tier ladder with sources cited.
+- **Result-card template insertions** — `${{wlCarbonRow(e)}}` after every Energy row across ~10 render templates (video single/both/all_codecs, LLM single/both/all/batch, RAG single, image single/both/compare-models). `${{wlCarbonStrip(...)}}` once per report at the top, using a sensible headline Wh per mode.
+- **Round-precision regression fix** — was `round(grams, 3)` in `wh_to_co2e`; changed to `round(grams, 9)` (nanogram precision). Caught when a tiny LLM task (~0.001 Wh on French grid) was rendering as `0 g` because 5.3e-5 truncated to 0.0 in persist. Lesson logged as a regression test.
+
+### Tests (first automated test suite in the repo)
+
+- `wattlab_service/tests/conftest.py` — pytest path setup so tests run with `pytest wattlab_service/tests/` from any cwd.
+- `wattlab_service/tests/test_carbon.py` — 28 tests covering: static fallback (3), the round-precision regression (named after the bug), live cache freshness (4 — fresh / stale-by-clock / stale-by-source-datetime / failed fetch), `walk_and_enrich` on every real result shape (10 — single, both, all_codecs, all, rag_compare, batch-with-list, idempotency, defensive non-dict handling), `comparison_table` (5), `compute_intensity_from_mix` IPCC AR6 fallback math (4). All 28 pass in 0.04s.
+- Pattern documented in the test file's docstring so the upcoming access-spine modules (audience.py / capabilities.py / queue_control.py) follow the same shape: pure logic, regression tests named after bugs, fixtures for module-state reset, no live HTTP.
+
+### Strategy / docs
+
+- **`CHANGE_REQUESTS.md`** (new doc) — captures architectural decisions:
+  - **CR-001 Two-tier OWL** — anonymous public + authenticated members + LAN/lab tier, single deployment with `audience.py` capability gating, magic-link email auth, OWL framed as a deliberate GoS membership funnel ("public sees results, members shape inputs"). Refined mid-session per training-prep transcript: anonymous tier *can* upload (capped at 100 MB, 1 concurrent job per visitor — 10 MB initially proposed and rejected for being below the P110 measurement floor).
+  - **CR-001b Demo lock** — `/tmp/owl-demo-lock` flag, owner-only enqueue access, auto-expire after `demo_lock_minutes` (default 60) so a forgotten lock during conference Q&A doesn't silently brick the system. Can ship before CR-001 with a `demo_lock_owner` stopgap.
+  - **CR-002 through CR-009** — methodology accuracy (CR-002, shipped this session); iso-energy bitrate sweep ("I want to spend X Wh, what are my options?", IBC white-paper material); visual graphing in result cards; software fan-speed control during tests; AI workloads → beta/skunkworks area; carbon variance over time-of-day/season/location study; REM ↔ OWL integration (branding step + long-term data interop); cross-platform web client test bay.
+- **`AUDIT_BRIEF.md`** + **`AUDIT_RESPONSE.md`** — pre-CR-001 architecture audit: brief sent to ChatGPT, ChatGPT's response captured. Both agreed: the issue isn't `main.py` size, it's coupling. Recommendation: build an access spine (`audience.py` / `capabilities.py` / `queue_control.py`) with tests *before* CR-001 lands. Estimate: 2–4 days. Tests should land *with* the spine — the carbon test suite this session is the warm-up.
+- **`TRAINING_OWL_5MIN.md`** — 5-minute spoken narrative of OWL for the GoS training course. Sibling deliverable `TRAINING_REM_5MIN.md` to be produced in a separate session (prompt drafted, REM repo at github.com/dom-robinson/stats).
+- **`rem-theme.css`** — ~220-line drop-in stylesheet that re-skins the REM Linksi page (`test.greeningofstreaming.org`) to match OWL's visual identity. CSS variables identical to OWL's `_BASE_STYLES`. Two minimal HTML edits required at REM's end (link tag + optional logo wordmark snippet, included as a comment).
+- **CLAUDE.md prune** — 383 → 189 lines, ~16.8k → ~5.1k tokens (~70% reduction). Dropped: stale Network/Tailscale temporary sections (Bouygues was restored long ago), session 11–15 implementation prose (one-line summaries kept), completed Phase 1–8 checklists, completed `[x]` items in Deferred, superseded findings. Kept: load-bearing context (server config, framing, protocol, traffic-light, current canonical findings, RAG faithfulness story).
+- **OWL public name confirmed** — project is publicly **OWL (Online WattLab)**; "WattLab" stays internal/repo. Captured in MEMORY.md so future sessions don't relearn.
+
+### What's NOT done
+
+- Service has not been restarted; the CR-002 methodology fixes are on disk but not yet visible on the live `/methodology` page. `sudo systemctl restart wattlab` to apply.
+- ElectricityMaps API trial submitted 2026-04-30, awaiting response (~24h). Once it arrives: paste token into `.env`, bump `carbon.py` `ELECTRICITYMAPS_URL` from v3/`.org` to v4/`.com` (one-line edit per current docs), restart.
+- `settings.json` has uncommitted drift unrelated to today's session (variance values nulled, baseline_polls 7→5, video_cooldown_s 30→15, llm_rest_s 10→8, bitrate fields propagated from DEFAULTS). Investigate before committing — cleared variance values may be deliberate (about to recalibrate) or an accidental flush.
+
+### Decisions / open questions surfaced
+
+- **OWL is a deliberate GoS membership funnel** (not just a tool with tiers). The capability matrix is product copy first, security model second. Locks are the pitch, not the punishment. Worth instrumenting CTA clicks weekly as funnel performance signal. Open question: CTA copy + click-through destination needs decision before conference launch.
+- **Magic-link email > OAuth** for member auth at this scale (~tens of GoS members). Avoids "create account" friction.
+- **Public usefulness is top-of-funnel.** Never gate measurement quality; only inputs (custom upload, custom prompts) and bookkeeping (CSV export, history) are member-only.
+- **Anonymous upload allowed at 100 MB cap, 1 concurrent job per visitor** — supports demonstrable measurement on the public side without abuse vectors.
+- **Tests-with-spine pattern** confirmed: every new module ships with its tests; no separate "testing sprint."
+
+### What's next
+
+1. Restart service to apply CR-002 fixes; verify on `/methodology`.
+2. ElectricityMaps token integration (when trial response arrives).
+3. **Access spine refactor** — `audience.py` + `capabilities.py` + `queue_control.py` with tests, in a branch with manual smoke checklist. Audit's #1 recommendation, prerequisite for CR-001. ~2–4 days.
+4. CR-001 implementation (auth, public landing page, locked-feature affordances) on top of the spine.
+5. CR-001b demo lock — can ship before/alongside CR-001 with `demo_lock_owner` stopgap.
+6. CR-006 AI → beta/skunkworks area (~half-day, affects visitor first-impression).
+
+### Files touched
+
+- New: `wattlab_service/carbon.py`, `wattlab_service/tests/conftest.py`, `wattlab_service/tests/test_carbon.py`, `CHANGE_REQUESTS.md`, `AUDIT_BRIEF.md`, `AUDIT_RESPONSE.md`, `TRAINING_OWL_5MIN.md`, `rem-theme.css`.
+- Modified: `wattlab_service/main.py`, `wattlab_service/persist.py`, `CLAUDE.md` (pruned), `JOURNAL.md` (this entry).
+- Memory: `~/.claude/projects/-home-gos-wattlab/memory/electricitymaps_trial.md`, `project_name.md`.
+
+---
+
 ## Session 15 — 2026-04-29
 
 ### What we did

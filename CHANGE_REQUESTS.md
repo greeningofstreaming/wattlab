@@ -8,6 +8,7 @@ Design / change requests captured for later implementation. Each entry has a sta
 
 **Status:** captured 2026-05-01 — awaiting implementation slot.
 **Triggered by:** demo today (2026-05-01) — discussion of opening OWL to the wider streaming community at the sustainable-streaming conference (mid-June 2026, OWL's first public showing).
+**Refined 2026-05-01 (training-prep transcript):** anonymous tier explicitly *can* upload (capped at 100 MB, 1 concurrent job per visitor); LAN/SSH-tunnel auto-detection already implements the Lab tier today; quotas restated below.
 
 ### Problem
 
@@ -65,13 +66,15 @@ Measurement quality is identical across tiers — only inputs and bookkeeping di
 | Live wall-power, CO₂e, comparison strip | ✓ | ✓ | ✓ |
 | Guided tour, methodology, Eco2mix mix breakdown | ✓ | ✓ | ✓ |
 | Browse public recent runs (anonymised) | ✓ | ✓ | ✓ |
-| Custom video upload | — | ✓ | ✓ |
+| Custom video upload | ✓ (≤100 MB, 1 concurrent job) | ✓ (no size cap, programmatic / scheduled allowed) | ✓ |
 | Custom prompts / custom ffmpeg commands | — | ✓ | ✓ |
 | All-codecs / batch / compare-modes | — | ✓ | ✓ |
 | RAG corpus upload | — | ✓ | ✓ |
 | CSV / JSON export of own runs | — | ✓ | ✓ |
 | Per-user run history, named presets | — | ✓ | ✓ |
 | `/settings`, variance calibration | — | — | ✓ |
+
+**Anonymous upload rationale:** 10 MB was floated and rejected — too small, jobs run too fast to lift power above the P110 measurement floor and produce a usable green-light reading. 100 MB sized to give a 1080p clip ~30 s+ of transcode wall-time, comparable to the bundled `meridian_120s` test asset (~123 MB).
 
 The line that holds against feature creep: **public sees results, members shape inputs.**
 
@@ -82,13 +85,13 @@ The line that holds against feature creep: **public sees results, members shape 
 - **Auth: magic-link email** (libraries like `mailauth`, `magic-link-auth`) preferred over GitHub OAuth — no "create account" step, single click from email. Member email allowlist is a small JSON file (~tens of GoS members, no DB needed).
 - **Replace `WATTLAB_GATE_PASSWORD`** entirely. The shared-password gate is the wrong shape for this model.
 - **Per-tier rate limiting and queue caps** (must, since same hostname):
-  - Anonymous: shared global pool, e.g. queue cap 3 across all anonymous, ~1 measurement/5min per IP.
-  - Member: relaxed per-user pool.
-  - Lab: uncapped.
+  - **Anonymous:** 1 concurrent job per visitor (single slot in the queue at a time — no parallel anonymous runs from the same browser session). 100 MB upload cap. nginx-level backstop ~1 measurement/5min per IP.
+  - **Member:** relaxed per-user pool — programmatic / scripted / scheduled-weekend runs explicitly allowed (this is part of the membership pitch).
+  - **Lab:** uncapped. **Already implemented today** via `_is_local()` — a member SSH-tunneling from outside back to localhost is auto-detected as Lab tier. CR-001 just generalises the existing carve-out into a named tier.
   - Conference-day spike from anonymous can't drain the queue and starve members.
 - **Public-side hardening:**
-  - No upload routes reachable for Anonymous tier.
-  - Length caps on any free-text input that does survive (RAG question, prompt).
+  - Upload route reachable for Anonymous, but capped at 100 MB and gated through `queue_control.enqueue_for(request, …)` so the 1-concurrent-job-per-visitor limit is enforced at the single chokepoint.
+  - Length caps on any free-text input (RAG question, prompt).
   - Strict CSP, no `eval`, etc.
   - Aggressive nginx rate limits as a backstop to in-app caps.
 
@@ -160,3 +163,224 @@ Can ship **before** CR-001 — uses today's auth model (the gate password = the 
 
 - "Extend" button — by `demo_lock_minutes` again, or by 15 min? Probably 15 min — extending in big chunks defeats the auto-expire safety.
 - Notification on auto-expire? Probably no — it's intended as a silent safety net. If owner needed to know, they wouldn't have left it on.
+
+---
+
+## CR-002 · Methodology page accuracy pass
+
+**Status:** captured 2026-05-01 — pre-conference must-fix.
+**Triggered by:** training-prep walkthrough of the methodology page (transcript ~T+790s) + owner notes.
+
+### Problem
+
+Three inaccuracies on `/methodology` need fixing before the page is shown to a public audience:
+
+1. **P110 power resolution stated as "1 W" — incomplete and misleading.** The Tapo P110 reports power at **1 W resolution via its public API** (which is what we currently poll), but **1 mW resolution via direct device read** (the underlying instrument is far better than the API exposes). The page should state both numbers and be explicit about which one this deployment uses.
+2. **`baseline_polls` hard-coded as `10` in the prose, but `settings.json` defaults to `5`** — disconnect between docs and behaviour. Either render the setting at request time (preferred — single source of truth) or at minimum drop the hard number and refer the reader to `/settings`.
+3. **"From energy to CO₂e" section names ElectricityMaps as the only live source** — Eco2mix was added later as the primary live source for France, with ElectricityMaps now a backup. Section needs updating to reflect the actual fallback ladder: **Eco2mix (RTE/Etalab) → ElectricityMaps → Ember 2024 static**. (The result-card formula footer was updated; the methodology page copy was missed.)
+
+### Agreed direction
+
+Single editing pass on the `_METHODOLOGY_HTML` block in `main.py`. No new features — accuracy patch only. Where possible, render values from settings/code at request time so future drift is impossible.
+
+### Pre-conference: must.
+
+---
+
+## CR-003 · Iso-energy bitrate sweep ("I want to spend X Wh, what are my options?")
+
+**Status:** captured 2026-05-01 — likely post-conference.
+**Triggered by:** Dom (transcript ~T+1126s and ~T+2398s).
+
+### Problem
+
+OWL currently fixes the bitrate per codec (4 Mbps H.264, 2 Mbps H.265, 1.5 Mbps AV1 — chosen to match real-world ABR ladders) and reports the energy that produces. The inverse question is more interesting for an industry audience: **"given a fixed energy budget, what bitrate / quality options do I have across codecs?"**
+
+Inverts the typical framing — instead of "this codec at this bitrate uses N Wh", asks "if I have N Wh to spend on a one-minute encode, here are my codec/bitrate options". Dom flagged this as IBC white-paper material; owner called it press-worthy.
+
+### Agreed direction
+
+New video-test mode (`video_iso_energy` or similar). Iterates a bitrate range across H.264 / H.265 / AV1 — long-running, intended for overnight or weekend execution — finds the bitrates per codec that produce equivalent energy. Output: chart/table of "for X Wh budget, your options are H.264@Y kbps / H.265@Z kbps / AV1@W kbps."
+
+Possibly pair with a quality metric (mean PSNR / SSIM / VMAF) so the result is "for X Wh, here's your bitrate AND quality across codecs" — Simon flagged in transcript that quality scoring should accompany this.
+
+### Open questions
+
+- Quality metric to use? VMAF is the streaming-industry standard but adds dependency.
+- Bitrate sweep granularity? Logarithmic vs linear?
+- White-paper scope: just CPU? Just GPU? Both? Cross-grid?
+
+### Pre-conference: unrealistic (long test runs needed). Post-conference: strong candidate, especially as IBC submission.
+
+---
+
+## CR-004 · Visual graphing in OWL
+
+**Status:** captured 2026-05-01 — pre-conference nice-to-have.
+**Triggered by:** Dom (transcript ~T+1657s) + owner notes.
+
+### Problem
+
+OWL currently renders all results as metric tables. Trend, variance, and shape are visible only by reading numbers row-by-row. Visitors are visual thinkers; demos land harder with a chart than a table.
+
+### Agreed direction
+
+Add chart rendering to result pages. Three candidates in priority order:
+
+1. **Per-run power trace** — line chart of P110 polls (1s cadence) across the run, showing baseline → ramp-up → workload → cooldown. Makes the ΔW computation visually obvious. Single canvas per result card.
+2. **Comparison-mode side-by-side** — bar chart for both/all-codecs/compare-models results, energy + CO₂e + duration on the same axis or stacked. Replaces or supplements the existing summary table.
+3. **Historical trend** — small chart on the home page or `/queue-status` showing last N runs' energy across run timestamp. Gives a feel for how stable the lab is over time.
+
+Library choice is open: chart.js (small, easy), uPlot (faster, smaller, ugly defaults), pure SVG (no dep, more code). Probably chart.js.
+
+### Pre-conference: nice-to-have. Would visibly improve demo impact.
+
+---
+
+## CR-005 · Software fan-speed control during tests
+
+**Status:** captured 2026-05-01 — pre-conference nice-to-have.
+**Triggered by:** Dom + owner (transcript ~T+1796s, ~T+1840s) + owner notes.
+
+### Problem
+
+The GoS1 server lives in the owner's sitting room with fans set conservatively low for noise reasons. The 2% baseline drift currently visible in calibration runs is partly thermal (the chassis runs warmer over a session). Manually pre-cooling with a desk fan would help but isn't scientific or repeatable.
+
+### Agreed direction
+
+Programmatic fan-speed control around tests:
+1. **Before a test starts:** raise fan speed to an aggressive profile (e.g. AMD `pp_dpm_fclk` / `fancontrol` / `nbfc`-style sysfs writes — exact mechanism TBD on AMD/Linux).
+2. **After the test ends:** restore the default quiet profile.
+3. **Configurable in `settings.json`** — `focus_mode_fan_profile: "aggressive" | "default" | "off"`. Default `"off"` so users who don't want their server howling aren't surprised.
+4. **Bonus:** capture the fan-profile-used in the result JSON for reproducibility.
+
+### Open questions
+
+- Exact mechanism on this hardware (Ryzen 9 7900 + RX 7800 XT + the chassis fans) — needs investigation. Likely a combination of GPU PWM (via `/sys/class/drm/card0/device/hwmon/`) and chassis fans (motherboard EC, possibly out of reach without IPMI/BMC).
+- Should this be exposed as part of focus mode (sudoers-gated stop-timers script) or as a separate sub-feature? Probably bundled into focus mode for cohesion.
+
+### Pre-conference: nice-to-have, improves measurement quality (lower baseline drift = tighter green-light thresholds).
+
+---
+
+## CR-006 · Move AI workloads (LLM, RAG, image-gen) to a "beta / skunkworks" area
+
+**Status:** captured 2026-05-01 — pre-conference, important for visitor framing.
+**Triggered by:** Dom (transcript ~T+2516s; owner agreed).
+
+### Problem
+
+OWL's home page currently presents Video / Image / LLM / RAG as equal first-class workloads. The video work is mature, repeatable, and on-mission for GoS (streaming impact). The AI workloads are exploratory, sometimes below the P110 measurement floor (TinyLlama short-task), and at risk of diluting GoS's streaming focus when shown to a streaming-industry audience.
+
+### Agreed direction
+
+Restructure the navigation so:
+- **Primary, prominent:** Video (transcoding) — the main GoS story.
+- **Beta / Skunkworks (visually de-emphasised, separate section):** LLM, RAG, Image generation. Still fully accessible, but framed as "exploratory work, energy/quality/faithfulness tradeoffs we're investigating" rather than "here's our authoritative answer."
+
+Affects:
+- Home page nav structure (move AI links into a labelled "Beta" or "Exploratory" group).
+- Guided Tour ordering — video stays as the headline; AI workloads may move later or to a separate skunkworks tour.
+- Possibly methodology page sectioning (clearer "production vs. exploratory" framing).
+
+### Pre-conference: important — shapes what conference visitors see first.
+
+---
+
+## CR-007 · Carbon variance study over time-of-day / season / location
+
+**Status:** captured 2026-05-01 — possible pre-conference talking point if scoped tight.
+**Triggered by:** Simon + Dom (transcript ~T+2029s onwards).
+
+### Problem
+
+OWL now reports gCO₂e against live grid intensity, but **the variance of that intensity itself** isn't characterised. Dom raised the right framing: if the carbon intensity of the grid varies by 1000% across the day, optimising your code by 1% is noise. If the grid varies by 1% and your code variation drives 50%, your code matters more. Without knowing which regime you're in, optimisation effort is mis-targeted.
+
+### Agreed direction
+
+Background or one-shot job:
+1. Take a **standard fixed-energy reference workload** (e.g. exactly 1 Wh of compute — could be a calibrated transcode or a synthetic CPU hold).
+2. Pull historical Eco2mix data for the last N months.
+3. Compute the resulting gCO₂e variance for that 1 Wh workload as a function of:
+   - Hour of day
+   - Day of week
+   - Season
+   - Comparison location (UK / Germany / Poland — using their available historical data)
+4. Render: a chart (CR-004 territory) plus a punchy summary line ("your 1 Wh workload, run in France, swung from X g to Y g over the last 6 months — Z× spread").
+
+Possible deliverable: a methodology-page sub-section, a separate `/grid-variance` page, or a one-off white paper.
+
+### Output value
+
+Strong conference talking point — speaks directly to Simon's "schedule your work to carbon-efficient times" thesis. Could become guidance for operators / regulators on workload scheduling. *"Move your workload to this time slot for X% lower carbon."*
+
+### Pre-conference: candidate if scoped tight. Worth a half-day spike to assess.
+
+---
+
+## CR-008 · REM ↔ OWL integration
+
+**Status:** captured 2026-05-01 — branding step pre-conference, full integration is post.
+**Triggered by:** Dom + owner across the transcript (~T+486s, ~T+2160s, ~T+3151s, ~T+1014s).
+
+### Problem
+
+GoS now has two measurement tools that were built independently:
+- **OWL** — single-server, fine-grained, encoder-side energy + CO₂e.
+- **REM** — multi-machine, end-to-end streaming workflow, less granular.
+
+They're **complementary, not competing**, but currently they look like separate projects. For a GoS audience, the right framing is "REM = end-to-end at scale; OWL = deep dive at the encoder; together they cover the streaming pipeline."
+
+### Agreed direction (multi-step)
+
+1. **(Pre-conference)** Pull REM source code into the Claude project context so cross-understanding is possible. Owner action item from transcript.
+2. **(Pre-conference)** Update REM with **OWL branding and visual style** — same owl mark, same `#00ff99` accent, same dark theme — so they read as one coherent GoS system. Dom's request.
+3. **(Post-conference)** Genuine data interoperability — OWL exporting in a format REM can ingest, or vice versa. Mash-up view where 100s of homes report from REM and 1-2 contribute high-resolution OWL-style local measurements; visualised together.
+4. **(Long-term, exploratory)** OWL acting as the encoder in a REM-orchestrated end-to-end test (encoder → intermediary server [Linode / TNO / Bristol] → client). Auto-hackathon workflow (see CR-009).
+
+### Pre-conference: branding pass is feasible; data integration is post.
+
+---
+
+## CR-009 · Cross-platform web client test bay
+
+**Status:** captured 2026-05-01 — post-conference.
+**Triggered by:** Dom (transcript ~T+1431s, ~T+2940s); Simon flagged the long-standing problem this solves (~T+1394s).
+
+### Problem
+
+Real-user-measurement (RUM) at the client side is the missing piece in GoS's measurement coverage. Hackathons have done it manually with TVs. Simon's prior attempts at automation hit a wall: when the encoder switches codecs/bitrates mid-stream, **media players have to be restarted**, which can't easily be done on a TV remotely. So every hackathon needs a human pressing play between tests.
+
+### Agreed direction
+
+Web-based test client that uses page-reload as the "restart media player" mechanism:
+- **Server side:** runs a 9-minute test sequence inside a 10-minute slot.
+- **Client side:** a thin web app that auto-refreshes the page every 10 minutes (using AJAX / `setTimeout` / page reload). Each refresh loads a fresh `<video>` element with the next stream's URL. Synchronised by clock, not by event.
+- **Cross-platform:** runs in any browser — iOS, Android, Roku, Apple TV, Samsung. No native app needed.
+- **Anonymous contribution flow:** "Test your device now" button on OWL's public landing — visitor leaves their browser open for an hour or two, contributes data, sees their result.
+- **Booking model (Dom):** since you can only have one active client tester at a time (to keep variance bounded), a slot-booking page lets contributors pick a 2-3 hour window over the weekend.
+
+### Action items from transcript
+
+- Dom to share his prior auto-refresh / autoplay code with Ben.
+- Simon to dig out his earlier server-side automation work (he had Cron-based scheduling on the server but never the client).
+
+### Effort estimate
+
+Dom guessed five days of Claude Code work. Probably correct order of magnitude. Cross-platform browser quirks (autoplay policies on iOS especially) will eat real time.
+
+### Pre-conference: unrealistic.
+### Post-conference: high leverage — turns OWL into a contribution-driven RUM platform, not just a single-server lab.
+
+---
+
+## Caught during the session but **not** new CRs
+
+For the record, several items came up that don't warrant new CR entries:
+
+- **Bug: `/settings` page rendered empty mid-run** (~T+338s) — owner observed this when trying to demo settings during a queued calibration. Filed as a bug to investigate, not a CR. May be related to job-state machine showing the page in a transient state. Repro: start a calibration, immediately reload `/settings`.
+- **Confidence multipliers (5× / 2×) need statistical grounding from Tanya** — already in CLAUDE.md "Open Questions" / Deferred. No new CR.
+- **Codec apples-to-apples equivalence (GOP, profile)** — already in CLAUDE.md Deferred. No new CR.
+- **Long-term mash-up of REM + OWL data for 100s of homes** — covered as the post-conference phase of CR-008. No separate CR.
+- **"Counter for OWL's own compute footprint"** (Dom, ~T+3319s, in passing) — fun meta-toy, not load-bearing. Skip.
+- **The 5-minute training narrative was generated mid-meeting** — captured separately if needed. No CR; deliverable not infrastructure.

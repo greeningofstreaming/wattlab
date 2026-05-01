@@ -1,0 +1,219 @@
+/*
+ * rem-theme.css — OWL family theme for REM
+ *
+ * Drop-in stylesheet that re-skins the REM Linksi page (and any sibling
+ * pages on test.greeningofstreaming.org) to match OWL's visual identity:
+ * dark lab aesthetic, electric-green accent, monospace voice, flat panels.
+ *
+ * The CSS variables in :root mirror OWL's `_BASE_STYLES` block in
+ * wattlab_service/main.py — keep them in sync if OWL's palette evolves
+ * and family resemblance is to be preserved.
+ *
+ * Integration:
+ *   1. Save this file in REM's static asset directory (e.g. /css/rem-theme.css).
+ *   2. Add ONE line to each REM HTML page, AFTER the existing <style> block
+ *      so its rules cascade last and win:
+ *
+ *        <link rel="stylesheet" href="rem-theme.css">
+ *
+ *   3. (Optional but recommended) Replace the existing <div class="logo">
+ *      with the owl-wordmark snippet at the bottom of this file. Requires
+ *      copying owl.svg from OWL's wattlab_service/static/ into REM's assets.
+ */
+
+
+/* ---------------------------------------------------------------- */
+/*  Design tokens — kept identical to OWL's _BASE_STYLES :root      */
+/* ---------------------------------------------------------------- */
+
+:root {
+  --bg:        #0a0a0a;
+  --panel:     #111;
+  --panel-2:   #0d0d0d;
+  --border:    #222;
+  --border-2:  #1a1a1a;
+  --border-3:  #333;
+
+  --text:      #e0e0e0;   /* primary body            */
+  --text-2:    #bbb;      /* bright secondary        */
+  --text-3:    #8a8a8a;   /* default secondary       */
+  --text-4:    #707070;   /* tertiary / muted        */
+  --text-5:    #5a5a5a;   /* faint decorative        */
+
+  --accent:        #00ff99;
+  --accent-hover:  #00dd88;
+  --accent-soft:   #00ff9922;
+  --warn:          #ffaa00;
+  --err:           #ff4400;
+}
+
+
+/* ---------------------------------------------------------------- */
+/*  Base — replace the green gradient with OWL's flat dark canvas    */
+/* ---------------------------------------------------------------- */
+
+body {
+  background: var(--bg) !important;
+  color: var(--text);
+  font-family: ui-monospace, "SF Mono", Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+h1 {
+  color: var(--accent) !important;
+  text-shadow: none !important;   /* drop the soft drop-shadow */
+  letter-spacing: 0.02em;
+  font-size: 1.6em !important;    /* OWL h1s are restrained, not hero-sized */
+  font-weight: bold;
+}
+
+
+/* ---------------------------------------------------------------- */
+/*  "▶ Player" switch button — borrow OWL's outline-button look     */
+/* ---------------------------------------------------------------- */
+
+.switch-button {
+  background: transparent !important;
+  color: var(--accent) !important;
+  border: 1px solid var(--accent) !important;
+  border-radius: 4px !important;
+  font-size: 0.85em !important;
+  letter-spacing: 0.04em;
+}
+
+.switch-button:hover,
+.switch-button:focus {
+  background: var(--accent-soft) !important;
+  transform: none !important;
+}
+
+
+/* ---------------------------------------------------------------- */
+/*  Section cards — dark panel + thin border, no drop-shadow         */
+/* ---------------------------------------------------------------- */
+
+.section {
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+}
+
+.section h2 {
+  color: var(--accent) !important;
+  border-bottom: 1px solid var(--border-3) !important;
+  font-size: 1.1em !important;
+  letter-spacing: 0.04em;
+}
+
+
+/* ---------------------------------------------------------------- */
+/*  Link items — flat dark cards with accent-on-hover                */
+/* ---------------------------------------------------------------- */
+
+.link-item {
+  background: var(--panel-2) !important;
+  color: var(--text-2) !important;
+  border: 1px solid var(--border-2) !important;
+  border-radius: 4px !important;
+  font-size: 0.9em !important;
+}
+
+.link-item:hover,
+.link-item:focus {
+  background: var(--accent-soft) !important;
+  color: var(--text) !important;
+  border-color: var(--accent) !important;
+  transform: none !important;
+}
+
+.link-title {
+  color: var(--text);
+}
+
+.link-url {
+  color: var(--text-4) !important;
+  opacity: 1 !important;
+}
+
+.link-item:hover .link-url,
+.link-item:focus .link-url {
+  color: var(--text-3) !important;
+}
+
+
+/* ---------------------------------------------------------------- */
+/*  Icon boxes — thin accent border, restrained                      */
+/* ---------------------------------------------------------------- */
+
+.icon {
+  background: var(--panel) !important;
+  color: var(--accent) !important;
+  border: 1px solid var(--accent) !important;
+  border-radius: 4px !important;
+  font-size: 18px !important;     /* tone down the consumer-app emoji size */
+}
+
+.link-item:hover .icon,
+.link-item:focus .icon {
+  background: var(--accent) !important;
+  color: var(--bg) !important;
+}
+
+
+/* ---------------------------------------------------------------- */
+/*  Logo wordmark — when the HTML snippet at the bottom is used,     */
+/*  these rules style it to match OWL's _BACK element                 */
+/* ---------------------------------------------------------------- */
+
+.gos-wordmark {
+  position: absolute;
+  top: 20px;
+  left: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  text-decoration: none;
+  font-family: ui-monospace, "SF Mono", Monaco, Consolas, monospace;
+  color: var(--text-3);
+  transition: color 0.2s;
+}
+
+.gos-wordmark:hover {
+  color: var(--accent);
+}
+
+.gos-wordmark img {
+  height: 26px;
+  width: 26px;
+  display: block;
+  flex-shrink: 0;
+}
+
+.gos-wordmark .product {
+  font-weight: bold;
+  letter-spacing: 0.04em;
+  font-size: 1rem;
+}
+
+.gos-wordmark .org {
+  color: var(--text-5);
+  margin-left: 0.4rem;
+  font-size: 0.7rem;
+}
+
+
+/* ---------------------------------------------------------------- */
+/*  HTML snippet for the wordmark — paste in place of the existing  */
+/*  <div class="logo"><img src="GoSLogo.jpeg" alt="Logo"></div>     */
+/* ---------------------------------------------------------------- */
+
+/*
+   <a href="https://greeningofstreaming.org" class="gos-wordmark">
+     <img src="owl.svg" alt="">
+     <span class="product">REM</span>
+     <span class="org">by Greening of Streaming</span>
+   </a>
+
+   You'll need owl.svg in REM's asset directory — copy it from
+   OWL at: wattlab_service/static/owl.svg (2.4 KB).
+*/
